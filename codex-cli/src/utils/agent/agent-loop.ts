@@ -114,8 +114,6 @@ export class AgentLoop {
       return;
     }
 
-    // Reset the current stream to allow new requests
-    this.currentStream = null;
     if (isLoggingEnabled()) {
       log(
         `AgentLoop.cancel() invoked – currentStream=${Boolean(
@@ -125,9 +123,16 @@ export class AgentLoop {
         )} generation=${this.generation}`,
       );
     }
+
+    // Abort the in‑flight OpenAI stream *before* discarding our reference so
+    // downstream logic (tests, callers) can observe the cancellation via the
+    // stream’s controller.
     (
       this.currentStream as { controller?: { abort?: () => void } } | null
     )?.controller?.abort?.();
+
+    // Now clear the reference so a subsequent run starts fresh.
+    this.currentStream = null;
 
     this.canceled = true;
 
@@ -425,8 +430,29 @@ export class AgentLoop {
       // we have to emit dummy tool outputs so that the API no longer expects
       // them.  We prepend them to the user‑supplied input so they appear
       // first in the conversation turn.
+      // -------------------------------------------------------------------
+      // Satisfy any *previously* emitted function calls that were left
+      // dangling because the user hit Esc‑Esc *after* the model produced the
+      // call but *before* we could stream the corresponding `completed`
+      // event.  The OpenAI API only accepts a `function_call_output` when the
+      // request includes **previous_response_id** that refers to the response
+      // holding the original function call.  When we do not know that ID
+      // (because the stream never reached the `response.completed` event) we
+      // must NOT send a synthetic output – doing so leads to the dreaded
+      //   400 | No tool output found for function call …
+      // error.
+      //
+      // We therefore only queue abort stubs when *both*
+      //   1) we have at least one pending call ID, *and*
+      //   2) the caller provided a non‑empty `previousResponseId` that we can
+      //      attach to the request.
+      // In all other cases we silently discard the dangling call IDs. This
+      // emulates the behaviour of rolling back the partial assistant turn
+      // (i.e. exactly what the user expected when they pressed Esc‑Esc).
+      // -------------------------------------------------------------------
+
       const abortOutputs: Array<ResponseInputItem> = [];
-      if (this.pendingAborts.size > 0) {
+      if (previousResponseId && this.pendingAborts.size > 0) {
         for (const id of this.pendingAborts) {
           abortOutputs.push({
             type: "function_call_output",
@@ -439,6 +465,19 @@ export class AgentLoop {
         }
         // Once converted the pending list can be cleared.
         this.pendingAborts.clear();
+      } else if (!previousResponseId) {
+        // We have no way to satisfy the orphaned calls – wipe the slate so we
+        // do not attempt again in subsequent runs.
+        this.pendingAborts.clear();
+
+        // Also reset the externally stored lastResponseId so the caller will
+        // NOT forward an outdated `previous_response_id` that would prompt
+        // the API to look for the (now discarded) tool results.
+        try {
+          this.onLastResponseId("");
+        } catch {
+          /* ignore – best‑effort */
+        }
       }
 
       let turnInput = [...abortOutputs, ...input];
