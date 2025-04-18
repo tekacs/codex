@@ -45,6 +45,7 @@ export default function TerminalChatInput({
   onCompact,
   interruptAgent,
   active,
+  items = [],
 }: {
   isNew: boolean;
   loading: boolean;
@@ -65,6 +66,8 @@ export default function TerminalChatInput({
   onCompact: () => void;
   interruptAgent: () => void;
   active: boolean;
+  // New: current conversation items so we can include them in bug reports
+  items?: Array<ResponseItem>;
 }): React.ReactElement {
   const app = useApp();
   const [selectedSuggestion, setSelectedSuggestion] = useState<number>(0);
@@ -240,6 +243,85 @@ export default function TerminalChatInput({
         );
 
         return;
+      } else if (inputValue === "/bug") {
+        // Generate a GitHub bug report URL pre‑filled with session details
+        setInput("");
+
+        try {
+          // Dynamically import dependencies to avoid unnecessary bundle size
+          const [{ default: open }, os] = await Promise.all([
+            import("open"),
+            import("node:os"),
+          ]);
+
+          // Build a minimal JSON representation of the session to keep the URL length reasonable
+          const sessionJson = JSON.stringify(items ?? [], null, 2);
+
+          // Truncate session if it's too large (GitHub accepts fairly long URLs but browsers may cap at ~2000 chars)
+          const MAX_BODY_CHARS = 1500;
+          const truncatedSession =
+            sessionJson.length > MAX_BODY_CHARS
+              ? `${sessionJson.slice(0, MAX_BODY_CHARS)}… (truncated)`
+              : sessionJson;
+
+          // Lazy import CLI_VERSION to avoid circular deps
+          const { CLI_VERSION } = await import("../../utils/session.js");
+
+          const title = encodeURIComponent("Codex CLI bug report");
+
+          const bodyLines = [
+            "### What happened?\n",
+            "(Please describe what you were doing when the issue occurred)\n\n",
+            `**CLI version**: ${CLI_VERSION}\n`,
+            `**Node version**: ${process.version}\n`,
+            `**OS**: ${os.platform()} ${os.release()}\n\n`,
+            "### Session log\n",
+            "```json\n",
+            truncatedSession,
+            "\n```\n",
+          ];
+
+          const body = encodeURIComponent(bodyLines.join(""));
+
+          const url = `https://github.com/openai/codex/issues/new?template=2-bug-report.yml&title=${title}&body=${body}`;
+
+          // Open the URL in the user's default browser
+          await open(url, { wait: false });
+
+          // Inform the user in the chat history
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `bugreport-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: "📋 Opened your browser to file a Codex bug report. Please review and submit!",
+                },
+              ],
+            },
+          ]);
+        } catch (error) {
+          // If anything went wrong, notify the user
+          setItems((prev) => [
+            ...prev,
+            {
+              id: `bugreport-error-${Date.now()}`,
+              type: "message",
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text: `⚠️ Failed to create bug report URL: ${error}`,
+                },
+              ],
+            },
+          ]);
+        }
+
+        return;
       } else if (inputValue.startsWith("/")) {
         // Handle invalid/unrecognized commands.
         // Only single-word inputs starting with '/' (e.g., /command) that are not recognized are caught here.
@@ -330,6 +412,7 @@ export default function TerminalChatInput({
       openHelpOverlay,
       history, // Add history to the dependency array
       onCompact,
+      items,
     ],
   );
 
