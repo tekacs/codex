@@ -63,11 +63,17 @@ pub(crate) fn format_output_for_model_body(content: &str) -> String {
     if content.len() <= MODEL_FORMAT_MAX_BYTES && total_lines <= MODEL_FORMAT_MAX_LINES {
         return content.to_string();
     }
-    let output = truncate_formatted_exec_output(content, total_lines);
+
+    let output = if total_lines > MODEL_FORMAT_MAX_LINES {
+        truncate_formatted_exec_output_by_lines(content, total_lines)
+    } else {
+        truncate_formatted_exec_output_by_bytes(content)
+    };
+
     format!("Total output lines: {total_lines}\n\n{output}")
 }
 
-fn truncate_formatted_exec_output(content: &str, total_lines: usize) -> String {
+fn truncate_formatted_exec_output_by_lines(content: &str, total_lines: usize) -> String {
     let segments: Vec<&str> = content.split_inclusive('\n').collect();
     let head_take = MODEL_FORMAT_HEAD_LINES.min(segments.len());
     let tail_take = MODEL_FORMAT_TAIL_LINES.min(segments.len().saturating_sub(head_take));
@@ -125,4 +131,57 @@ fn truncate_formatted_exec_output(content: &str, total_lines: usize) -> String {
     result.push_str(tail_part);
 
     result
+}
+
+fn truncate_formatted_exec_output_by_bytes(content: &str) -> String {
+    let marker = format!("\n[... output truncated to fit {MODEL_FORMAT_MAX_BYTES} bytes ...]\n\n");
+    let marker_len = marker.len();
+    let available_budget = MODEL_FORMAT_MAX_BYTES.saturating_sub(marker_len);
+    if available_budget == 0 {
+        return marker;
+    }
+
+    let mut head_budget = MODEL_FORMAT_HEAD_BYTES.min(available_budget);
+    let mut tail_budget = available_budget.saturating_sub(head_budget);
+    if tail_budget == 0 {
+        if head_budget > 0 {
+            head_budget -= 1;
+            tail_budget = 1;
+        } else {
+            // Degenerate but safe fallback.
+            return marker;
+        }
+    }
+
+    let head_part = take_bytes_at_char_boundary(content, head_budget);
+    let tail_part = take_last_bytes_at_char_boundary(content, tail_budget);
+
+    let mut result = String::with_capacity(MODEL_FORMAT_MAX_BYTES.min(content.len()));
+    result.push_str(head_part);
+    result.push_str(&marker);
+    result.push_str(tail_part);
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_truncation_includes_tail_segment() {
+        let prefix = "a".repeat(MODEL_FORMAT_MAX_BYTES);
+        let suffix = "\nerror: boom\n";
+        let content = format!("{prefix}{suffix}");
+
+        let output = format_output_for_model_body(&content);
+
+        assert!(
+            output.contains("error: boom"),
+            "tail segment should be preserved"
+        );
+        assert!(
+            output.contains("[... output truncated"),
+            "marker should indicate truncation"
+        );
+    }
 }
