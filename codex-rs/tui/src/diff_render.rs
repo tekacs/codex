@@ -94,9 +94,13 @@ use crate::terminal_palette::default_bg;
 use crate::terminal_palette::indexed_color;
 use crate::terminal_palette::rgb_color;
 use crate::terminal_palette::stdout_color_level;
+use crate::wrapping::word_wrap_lines;
+use codex_ansi_escape::ansi_escape_line;
 use codex_git_utils::get_git_repo_root;
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
+
+const DIFFTASTIC_SPLIT_MARKER: &str = "\n\x1eCODEX_DIFFTASTIC\x1e\n";
 
 /// Classifies a diff line for gutter sign rendering and style selection.
 ///
@@ -546,6 +550,15 @@ fn render_change(
             }
         }
         FileChange::Update { unified_diff, .. } => {
+            let (unified_diff, difftastic_render) = split_unified_diff(unified_diff);
+            if let Some(rendered) = difftastic_render {
+                out.extend(word_wrap_lines(
+                    rendered.lines().map(ansi_escape_line),
+                    width,
+                ));
+                return;
+            }
+
             if let Ok(patch) = diffy::Patch::from_str(unified_diff) {
                 let mut max_line_number = 0;
                 let mut total_diff_bytes: usize = 0;
@@ -762,7 +775,14 @@ pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {
     chosen.display().to_string()
 }
 
+fn split_unified_diff(diff: &str) -> (&str, Option<&str>) {
+    diff.split_once(DIFFTASTIC_SPLIT_MARKER)
+        .map(|(unified, rendered)| (unified, Some(rendered)))
+        .unwrap_or((diff, None))
+}
+
 pub(crate) fn calculate_add_remove_from_diff(diff: &str) -> (usize, usize) {
+    let (diff, _) = split_unified_diff(diff);
     if let Ok(patch) = diffy::Patch::from_str(diff) {
         patch
             .hunks()
