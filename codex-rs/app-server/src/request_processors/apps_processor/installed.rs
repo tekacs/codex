@@ -115,6 +115,7 @@ impl AppsRequestProcessor {
                         auth_manager: codex_apps_auth_manager,
                         elicitation_reviewer: None,
                         elicitation_lifecycle: None,
+                        resource_update_handler: None,
                     })
                     .await;
 

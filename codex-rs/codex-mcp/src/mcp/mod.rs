@@ -472,6 +472,7 @@ pub async fn read_mcp_resource(
             auth_manager: None,
             elicitation_reviewer: None,
             elicitation_lifecycle: None,
+            resource_update_handler: None,
         },
         crate::elicitation::ElicitationRequestRouter::default(),
     )
@@ -552,6 +553,7 @@ pub async fn collect_mcp_server_status_snapshot_with_detail(
             auth_manager: None,
             elicitation_reviewer: None,
             elicitation_lifecycle: None,
+            resource_update_handler: None,
         },
         crate::elicitation::ElicitationRequestRouter::default(),
     )

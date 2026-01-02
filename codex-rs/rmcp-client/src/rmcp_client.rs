@@ -377,6 +377,9 @@ pub type SendElicitation = Box<
     dyn Fn(RequestId, Elicitation) -> BoxFuture<'static, Result<ElicitationResponse>> + Send + Sync,
 >;
 
+/// Delivers model-visible content after an MCP resource changes.
+pub type HandleResourceUpdate = Arc<dyn Fn(String) -> BoxFuture<'static, ()> + Send + Sync>;
+
 pub struct ToolWithConnectorId {
     pub tool: Tool,
     pub connector_id: Option<String>,
@@ -406,6 +409,7 @@ pub struct RmcpClient {
     initialize_context: Mutex<Option<InitializeContext>>,
     session_recovery_lock: Semaphore,
     elicitation_pause_state: ElicitationPauseState,
+    resource_update_handler: Option<HandleResourceUpdate>,
 }
 
 impl RmcpClient {
@@ -446,6 +450,7 @@ impl RmcpClient {
             initialize_context: Mutex::new(None),
             session_recovery_lock: Semaphore::new(/*permits*/ 1),
             elicitation_pause_state: ElicitationPauseState::new(),
+            resource_update_handler: None,
         })
     }
 
@@ -520,6 +525,7 @@ impl RmcpClient {
             requires_read_only_tools: false,
             session_recovery_lock: Semaphore::new(/*permits*/ 1),
             elicitation_pause_state: ElicitationPauseState::new(),
+            resource_update_handler: None,
         })
     }
 
@@ -626,7 +632,12 @@ impl RmcpClient {
             requires_read_only_tools: false,
             session_recovery_lock: Semaphore::new(/*permits*/ 1),
             elicitation_pause_state: ElicitationPauseState::new(),
+            resource_update_handler: None,
         })
+    }
+
+    pub fn set_resource_update_handler(&mut self, handler: HandleResourceUpdate) {
+        self.resource_update_handler = Some(handler);
     }
 
     /// Perform the initialization handshake with the MCP server.
@@ -1283,6 +1294,7 @@ impl RmcpClient {
             initialize_context.client_info.clone(),
             Box::new(move |id, request| send_elicitation(id, request)),
             self.elicitation_pause_state.clone(),
+            self.resource_update_handler.clone(),
         );
         let _initialize_deadline = match &self.transport_recipe {
             TransportRecipe::StreamableHttp {

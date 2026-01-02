@@ -20,19 +20,26 @@ use tracing::info;
 use tracing::warn;
 
 use crate::rmcp_client::Elicitation;
+use crate::rmcp_client::HandleResourceUpdate;
 use crate::rmcp_client::SendElicitation;
 
 #[derive(Clone)]
 pub(crate) struct LoggingClientHandler {
     client_info: ClientInfo,
     send_elicitation: Arc<SendElicitation>,
+    resource_update_handler: Option<HandleResourceUpdate>,
 }
 
 impl LoggingClientHandler {
-    pub(crate) fn new(client_info: ClientInfo, send_elicitation: SendElicitation) -> Self {
+    pub(crate) fn new(
+        client_info: ClientInfo,
+        send_elicitation: SendElicitation,
+        resource_update_handler: Option<HandleResourceUpdate>,
+    ) -> Self {
         Self {
             client_info,
             send_elicitation: Arc::new(send_elicitation),
+            resource_update_handler,
         }
     }
 }
@@ -74,9 +81,66 @@ impl ClientHandler for LoggingClientHandler {
     async fn on_resource_updated(
         &self,
         params: ResourceUpdatedNotificationParam,
-        _context: NotificationContext<RoleClient>,
+        context: NotificationContext<RoleClient>,
     ) {
-        info!("MCP server resource updated (uri: {})", params.uri);
+        let uri = params.uri.to_string();
+        let server_name = context
+            .peer
+            .peer_info()
+            .and_then(|info| info.server_info.as_ref().map(|server| server.name.clone()))
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(server = server_name, uri, "MCP server resource updated");
+
+        let Some(handle_resource_update) = self.resource_update_handler.clone() else {
+            return;
+        };
+        let resource = match context
+            .peer
+            .read_resource(rmcp::model::ReadResourceRequestParams::new(uri.clone()))
+            .await
+        {
+            Ok(result) => {
+                let parts = result
+                    .contents
+                    .into_iter()
+                    .map(|content| match content {
+                        rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
+                            format!(
+                                "<resource server=\"{server_name}\" uri=\"{uri}\">\n{text}\n</resource>"
+                            )
+                        }
+                        rmcp::model::ResourceContents::BlobResourceContents {
+                            blob,
+                            mime_type,
+                            ..
+                        } => {
+                            let mime = mime_type.as_deref().unwrap_or("application/octet-stream");
+                            format!(
+                                "<resource server=\"{server_name}\" uri=\"{uri}\" type=\"blob\" mime-type=\"{mime}\" size=\"{}\">\n[Binary resource - use read_mcp_resource to retrieve if needed]\n</resource>",
+                                blob.len()
+                            )
+                        }
+                        _ => format!(
+                            "<resource server=\"{server_name}\" uri=\"{uri}\">\n[unsupported resource content]\n</resource>"
+                        ),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("<resource-updated server=\"{server_name}\" uri=\"{uri}\" />\n{parts}")
+            }
+            Err(error) => {
+                warn!(
+                    server = server_name,
+                    uri,
+                    ?error,
+                    "failed to read updated MCP resource"
+                );
+                format!(
+                    "<resource-updated server=\"{server_name}\" uri=\"{uri}\" />\n<resource server=\"{server_name}\" uri=\"{uri}\">\n[error reading resource: {error:?}]\n</resource>"
+                )
+            }
+        };
+        handle_resource_update(resource).await;
     }
 
     async fn on_resource_list_changed(&self, _context: NotificationContext<RoleClient>) {

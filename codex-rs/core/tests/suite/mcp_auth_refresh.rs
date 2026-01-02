@@ -111,6 +111,7 @@ async fn hosted_plugin_runtime_ps_mcp_tool_calls_use_current_auth_manager_token(
         auth_manager: Some(Arc::clone(&auth_manager)),
         elicitation_reviewer: None,
         elicitation_lifecycle: None,
+        resource_update_handler: None,
     })
     .await;
     // The model-provider test covers AuthManager reload behavior. Keep this

@@ -64,6 +64,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::McpStartupStatus;
 use codex_protocol::protocol::McpStartupUpdateEvent;
 use codex_rmcp_client::ExecutorStdioServerLauncher;
+use codex_rmcp_client::HandleResourceUpdate;
 use codex_rmcp_client::LocalStdioServerLauncher;
 use codex_rmcp_client::McpOAuthRefreshMode;
 use codex_rmcp_client::McpProtocolMode;
@@ -301,6 +302,7 @@ struct ManagedClientStartup {
     client_elicitation_capability: ElicitationCapability,
     client_mcp_extensions: ClientMcpExtensions,
     auth_changes: Option<watch::Receiver<AuthChangeState>>,
+    resource_update_handler: Option<HandleResourceUpdate>,
     protocol_mode: McpProtocolMode,
     catalog_item_limit: usize,
     cancel_token: CancellationToken,
@@ -331,6 +333,7 @@ impl ManagedClientStartup {
             client_elicitation_capability,
             client_mcp_extensions,
             auth_changes,
+            resource_update_handler,
             protocol_mode,
             catalog_item_limit,
             cancel_token,
@@ -369,9 +372,13 @@ impl ManagedClientStartup {
                 )
                 .await
                 {
-                    Ok(result) => Arc::new(
-                        result?.with_read_only_tools(server.requires_read_only_mcp_tools()),
-                    ),
+                    Ok(result) => {
+                        let mut client = result?.with_read_only_tools(server.requires_read_only_mcp_tools());
+                        if let Some(resource_update_handler) = resource_update_handler {
+                            client.set_resource_update_handler(resource_update_handler);
+                        }
+                        Arc::new(client)
+                    }
                     Err(_) => {
                         return Err(StartupOutcomeError::from(anyhow!(
                             "MCP client startup timed out after {startup_timeout:?}"
@@ -464,6 +471,7 @@ impl AsyncManagedClient {
         client_elicitation_capability: ElicitationCapability,
         client_mcp_extensions: ClientMcpExtensions,
         auth_changes: Option<watch::Receiver<AuthChangeState>>,
+        resource_update_handler: Option<HandleResourceUpdate>,
         protocol_mode: McpProtocolMode,
         catalog_item_limit: usize,
     ) -> Self {
@@ -495,6 +503,7 @@ impl AsyncManagedClient {
             client_elicitation_capability,
             client_mcp_extensions,
             auth_changes,
+            resource_update_handler,
             protocol_mode,
             catalog_item_limit,
             cancel_token: cancel_token.clone(),
