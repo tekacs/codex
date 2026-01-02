@@ -228,6 +228,7 @@ impl McpConnectionSet {
             auth_manager,
             elicitation_reviewer,
             elicitation_lifecycle,
+            resource_update_handler,
         } = input;
         let store_mode = config.mcp_oauth_credentials_store_mode;
         let keyring_backend_kind = config.auth_keyring_backend_kind;
@@ -553,6 +554,7 @@ impl McpConnectionSet {
                 runtime_auth_provider,
                 client_elicitation_capability.clone(),
                 client_mcp_extensions.clone(),
+                resource_update_handler.clone(),
                 protocol_mode,
                 catalog_item_limit,
             );

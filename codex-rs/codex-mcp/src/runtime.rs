@@ -34,6 +34,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_rmcp_client::ElicitationResponse;
+use codex_rmcp_client::HandleResourceUpdate;
 use codex_rmcp_client::with_http_headers_helper;
 use codex_utils_path_uri::PathUri;
 use rmcp::model::ReadResourceRequestParams;
@@ -85,6 +86,7 @@ pub struct McpRuntimeInput {
     pub auth_manager: Option<Arc<AuthManager>>,
     pub elicitation_reviewer: Option<ElicitationReviewerHandle>,
     pub elicitation_lifecycle: Option<ElicitationLifecycle>,
+    pub resource_update_handler: Option<HandleResourceUpdate>,
 }
 
 /// Owns all mutable MCP state for one Codex thread.

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use crate::agent::AgentControl;
 use crate::agents_md_manager::AgentsMdManager;
@@ -47,6 +48,7 @@ use tokio::sync::Mutex;
 pub(crate) struct SessionServices {
     /// The single owner of live MCP connections for this thread.
     pub(crate) mcp_runtime: Arc<McpRuntime>,
+    pub(crate) resource_update_handler: OnceLock<codex_rmcp_client::HandleResourceUpdate>,
     /// Immutable MCP handlers scoped to this thread's current binding.
     pub(crate) mcp_handler_cache: McpHandlerCache,
     pub(crate) unified_exec_manager: UnifiedExecProcessManager,

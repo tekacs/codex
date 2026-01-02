@@ -402,6 +402,7 @@ impl Session {
             auth_manager: Some(Arc::clone(&self.services.auth_manager)),
             elicitation_reviewer,
             elicitation_lifecycle: Some(self.mcp_elicitation_lifecycle()),
+            resource_update_handler: self.services.resource_update_handler.get().cloned(),
         }
     }
 }

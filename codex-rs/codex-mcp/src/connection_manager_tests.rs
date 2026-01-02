@@ -1990,6 +1990,7 @@ async fn codex_apps_extension_does_not_share_host_owned_tools_cache() -> anyhow:
                 EffectiveMcpServer::configured(server_config),
             )]),
             submit_id: "cache-ownership-test".to_string(),
+            resource_update_handler: None,
             tx_event: None,
             startup_cancellation_token,
             runtime_context: McpRuntimeContext::new(
@@ -4267,6 +4268,7 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
                 ready_selected_capability_roots: Vec::new(),
                 mcp_servers,
                 submit_id: "security-test".to_string(),
+                resource_update_handler: None,
                 tx_event: None,
                 startup_cancellation_token: CancellationToken::new(),
                 runtime_context: runtime_context.clone(),
@@ -4389,6 +4391,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
                 Arc::new(environment_manager_without_environments()),
                 PathBuf::from("/tmp"),
             ),
+            resource_update_handler: None,
             codex_apps_tools_cache: ConnectorRuntimeManager::<ToolInfo>::default(),
             tool_catalog_cache: McpToolCatalogCache::default(),
             codex_apps_tools_cache_key: ConnectorRuntimeContextKey::personal(
@@ -4819,6 +4822,7 @@ async fn reconcile_reusable_server_with_mcp_config(
                 EffectiveMcpServer::configured(config),
             )]),
             submit_id: "refresh".to_string(),
+            resource_update_handler: None,
             tx_event: Some(tx_event),
             startup_cancellation_token: CancellationToken::new(),
             runtime_context,
@@ -5300,6 +5304,7 @@ async fn reconciliation_replaces_connection_when_protocol_mode_changes() {
             auth_manager: None,
             elicitation_reviewer: None,
             elicitation_lifecycle: None,
+            resource_update_handler: None,
         },
         ElicitationRequestRouter::default(),
     )
@@ -5358,6 +5363,7 @@ async fn reconciliation_reuses_legacy_stdio_server_when_modern_protocol_is_enabl
             auth_manager: None,
             elicitation_reviewer: None,
             elicitation_lifecycle: None,
+            resource_update_handler: None,
         },
         ElicitationRequestRouter::default(),
     )

@@ -1411,6 +1411,7 @@ impl Session {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.
                 mcp_runtime,
+                resource_update_handler: OnceLock::new(),
                 mcp_handler_cache: Default::default(),
                 unified_exec_manager: UnifiedExecProcessManager::new(
                     config.background_terminal_max_timeout,
@@ -1528,6 +1529,24 @@ impl Session {
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
             });
+            let weak_session = Arc::downgrade(&sess);
+            let resource_update_handler: codex_rmcp_client::HandleResourceUpdate =
+                Arc::new(move |body| {
+                    let weak_session = weak_session.clone();
+                    Box::pin(async move {
+                        if let Some(session) = weak_session.upgrade() {
+                            session.handle_resource_update(body).await;
+                        }
+                    })
+                });
+            assert!(
+                sess.services
+                    .resource_update_handler
+                    .set(resource_update_handler)
+                    .is_ok(),
+                "resource update handler should be initialized once"
+            );
+
             if let Some(network_policy_decider_session) = network_policy_decider_session {
                 let mut guard = network_policy_decider_session.write().await;
                 *guard = Arc::downgrade(&sess);

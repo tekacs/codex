@@ -73,6 +73,7 @@ pub use rmcp::model::ElicitationAction;
 pub use rmcp_client::CancellableEventStreamRequest;
 pub use rmcp_client::Elicitation;
 pub use rmcp_client::ElicitationResponse;
+pub use rmcp_client::HandleResourceUpdate;
 pub use rmcp_client::ListToolsWithConnectorIdResult;
 pub use rmcp_client::RmcpClient;
 pub use rmcp_client::SendElicitation;
