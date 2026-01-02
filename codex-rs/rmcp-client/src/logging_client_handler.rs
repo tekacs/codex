@@ -19,6 +19,20 @@ use tracing::warn;
 
 use crate::rmcp_client::SendElicitation;
 
+// Global queue for MCP resource notifications to inject into model context.
+// Used by on_resource_updated to queue messages, drained by codex core after tool calls.
+static PENDING_INJECTIONS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+/// Drain all pending injection messages (called from codex core after tool outputs).
+pub fn take_pending_injections() -> Vec<String> {
+    std::mem::take(
+        &mut *PENDING_INJECTIONS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+}
+
 #[derive(Clone)]
 pub(crate) struct LoggingClientHandler {
     client_info: ClientInfo,
@@ -71,9 +85,68 @@ impl ClientHandler for LoggingClientHandler {
     async fn on_resource_updated(
         &self,
         params: ResourceUpdatedNotificationParam,
-        _context: NotificationContext<RoleClient>,
+        context: NotificationContext<RoleClient>,
     ) {
-        info!("MCP server resource updated (uri: {})", params.uri);
+        let uri = params.uri.to_string();
+        let server_name = context
+            .peer
+            .peer_info()
+            .map(|info| info.server_info.name.as_str())
+            .unwrap_or("unknown");
+
+        info!(
+            "MCP server resource updated (server: {}, uri: {})",
+            server_name, uri
+        );
+
+        // Read the resource and format injection based on content type
+        let injection = match context
+            .peer
+            .read_resource(rmcp::model::ReadResourceRequestParams {
+                meta: None,
+                uri: uri.clone(),
+            })
+            .await
+        {
+            Ok(result) => {
+                let mut parts = Vec::new();
+                for item in result.contents {
+                    match item {
+                        rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
+                            parts.push(format!(
+                                "<resource server=\"{server_name}\" uri=\"{uri}\">\n{text}\n</resource>",
+                            ));
+                        }
+                        rmcp::model::ResourceContents::BlobResourceContents {
+                            blob,
+                            mime_type,
+                            ..
+                        } => {
+                            let mime = mime_type.as_deref().unwrap_or("application/octet-stream");
+                            parts.push(format!(
+                                "<resource server=\"{server_name}\" uri=\"{uri}\" type=\"blob\" mime-type=\"{mime}\" size=\"{}\">\n[Binary resource - use ReadMcpResourceTool to retrieve if needed]\n</resource>",
+                                blob.len()
+                            ));
+                        }
+                    }
+                }
+                format!(
+                    "<resource-updated server=\"{server_name}\" uri=\"{uri}\" />\n{}",
+                    parts.join("\n")
+                )
+            }
+            Err(e) => {
+                warn!("Failed to read resource {}: {:?}", uri, e);
+                format!(
+                    "<resource-updated server=\"{server_name}\" uri=\"{uri}\" />\n<resource server=\"{server_name}\" uri=\"{uri}\">\n[error reading resource: {e:?}]\n</resource>",
+                )
+            }
+        };
+
+        PENDING_INJECTIONS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(injection);
     }
 
     async fn on_resource_list_changed(&self, _context: NotificationContext<RoleClient>) {
