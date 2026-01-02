@@ -1827,6 +1827,17 @@ async fn drain_in_flight(
             }
         }
     }
+    // Drain any pending MCP resource injections (pre-formatted content from on_resource_updated)
+    for text in codex_rmcp_client::take_pending_injections() {
+        let msg = ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text }],
+            end_turn: None,
+            phase: None,
+        };
+        sess.record_conversation_items(&turn_context, &[msg]).await;
+    }
     Ok(())
 }
 
