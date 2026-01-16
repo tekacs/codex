@@ -368,6 +368,8 @@ pub enum Feature {
     StepModelSwitching,
     /// Enable voice conversations in the TUI.
     RealtimeConversation,
+    /// Prune older tool outputs from requests to reduce context usage.
+    ToolOutputPrune,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
     /// Removed compatibility key, still advertised to the Responses API.
@@ -1778,6 +1780,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "realtime_conversation",
         stage: Stage::Stable,
         default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::ToolOutputPrune,
+        key: "tool_output_prune",
+        stage: Stage::Experimental {
+            name: "Tool output pruning",
+            menu_description: "Prune older tool outputs from requests to reduce context usage.",
+            announcement: "NEW! Try tool output pruning to reduce token usage. Enable in /experimental!",
+        },
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::RemoteControl,
