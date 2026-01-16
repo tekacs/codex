@@ -342,6 +342,8 @@ pub enum Feature {
     StepModelSwitching,
     /// Removed compatibility flag. Realtime sessions no longer require a per-thread opt-in.
     RealtimeConversation,
+    /// Prune older tool outputs from requests to reduce context usage.
+    ToolOutputPrune,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
     /// Enable remote compaction v2 over the normal Responses API.
@@ -1660,6 +1662,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::RealtimeConversation,
         key: "realtime_conversation",
         stage: Stage::Removed,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ToolOutputPrune,
+        key: "tool_output_prune",
+        stage: Stage::Experimental {
+            name: "Tool output pruning",
+            menu_description: "Prune older tool outputs from requests to reduce context usage.",
+            announcement: "NEW! Try tool output pruning to reduce token usage. Enable in /experimental!",
+        },
         default_enabled: false,
     },
     FeatureSpec {

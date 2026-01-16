@@ -990,6 +990,9 @@
             "tool_call_mcp_elicitation": {
               "type": "boolean"
             },
+            "tool_output_prune": {
+              "type": "boolean"
+            },
             "tool_registry": {
               "$ref": "#/definitions/ToolRegistryConfigToml"
             },
@@ -6354,6 +6357,9 @@
           "$ref": "#/definitions/FeatureToml_for_TokenBudgetConfigToml"
         },
         "tool_call_mcp_elicitation": {
+          "type": "boolean"
+        },
+        "tool_output_prune": {
           "type": "boolean"
         },
         "tool_registry": {

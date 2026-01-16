@@ -1421,6 +1421,11 @@ async fn run_sampling_request(
     let turn_context = Arc::clone(&step_context.turn);
     let base_instructions = sess.get_prompt_base_instructions().await;
 
+    let input = if sess.enabled(Feature::ToolOutputPrune) {
+        crate::tool_output_prune::prune(&input)
+    } else {
+        input
+    };
     let tool_runtime = ToolCallRuntime::new(
         Arc::clone(&sess),
         Arc::clone(&step_context),
