@@ -151,6 +151,7 @@ impl ChatWidget {
                         UserMessageHistoryRecord::UserMessageText,
                         ShellEscapePolicy::Disallow,
                         UserMessageSource::QuestionAnswer,
+                        UserTurnOverrides::default(),
                     )
                     .0
                 };

@@ -70,6 +70,11 @@ pub(crate) fn submitted(result: &InputResult) {
         InputResult::Submitted {
             text,
             text_elements,
+        }
+        | InputResult::SubmittedWithOverrides {
+            text,
+            text_elements,
+            ..
         } => Some((text, text_elements, &[][..])),
         InputResult::Queued {
             text,

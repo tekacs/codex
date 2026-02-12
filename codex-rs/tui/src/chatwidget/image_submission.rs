@@ -76,6 +76,7 @@ impl ChatWidget {
                     pending.history_record,
                     ShellEscapePolicy::Disallow,
                     pending.source,
+                    UserTurnOverrides::default(),
                     Some(images),
                 );
                 if !accepted {

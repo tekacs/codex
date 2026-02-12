@@ -1065,6 +1065,11 @@ impl RequestUserInputOverlay {
                 text,
                 text_elements,
             }
+            | InputResult::SubmittedWithOverrides {
+                text,
+                text_elements,
+                ..
+            }
             | InputResult::Queued {
                 text,
                 text_elements,

@@ -364,11 +364,13 @@ impl ChatWidget {
                 }
                 if let Some((message, history_record)) = self.pop_next_queued_user_message() {
                     let source = message.source;
+                    let overrides = message.overrides.clone();
                     self.submit_user_message_with_history_and_shell_escape_policy(
                         message.into_user_message(),
                         history_record,
                         ShellEscapePolicy::Allow,
                         source,
+                        overrides,
                     );
                 }
             } else if !pending_steers.is_empty() {
@@ -383,6 +385,7 @@ impl ChatWidget {
                     history_record,
                     ShellEscapePolicy::Allow,
                     UserMessageSource::Prompt,
+                    UserTurnOverrides::default(),
                 );
             } else if let Some(combined) = self.drain_pending_messages_for_restore() {
                 self.restore_composer_state(combined);

@@ -60,6 +60,12 @@ pub(super) enum ShellEscapePolicy {
     Disallow,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct UserTurnOverrides {
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<ReasoningEffortConfig>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum UserMessageSource {
     Prompt,
@@ -71,15 +77,34 @@ pub(super) struct QueuedUserMessage {
     pub(super) user_message: UserMessage,
     pub(super) action: QueuedInputAction,
     pub(super) pending_pastes: Vec<(String, String)>,
+    pub(super) overrides: UserTurnOverrides,
     pub(super) source: UserMessageSource,
 }
 
 impl QueuedUserMessage {
     pub(super) fn new(user_message: UserMessage, action: QueuedInputAction) -> Self {
+        Self::new_with_overrides(user_message, action, UserTurnOverrides::default())
+    }
+
+    pub(super) fn new_with_overrides(
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        overrides: UserTurnOverrides,
+    ) -> Self {
+        Self::new_with_pending_and_overrides(user_message, action, Vec::new(), overrides)
+    }
+
+    pub(super) fn new_with_pending_and_overrides(
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        pending_pastes: Vec<(String, String)>,
+        overrides: UserTurnOverrides,
+    ) -> Self {
         Self {
             user_message,
             action,
-            pending_pastes: Vec::new(),
+            pending_pastes,
+            overrides,
             source: UserMessageSource::Prompt,
         }
     }

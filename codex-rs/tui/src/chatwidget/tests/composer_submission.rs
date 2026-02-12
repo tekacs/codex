@@ -391,6 +391,7 @@ async fn parent_owned_thread_preserves_queued_input_before_draining() {
         action: QueuedInputAction::Plain,
         pending_pastes: vec![("[Image 1]".to_string(), "pasted contents".to_string())],
         source: UserMessageSource::Prompt,
+        overrides: Default::default(),
     };
     let history_record = UserMessageHistoryRecord::UserMessageText;
     chat.input_queue
