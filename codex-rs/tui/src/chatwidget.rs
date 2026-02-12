@@ -395,6 +395,7 @@ const USER_SHELL_COMMAND_HELP_TITLE: &str = "Prefix a command with ! to run it l
 const USER_SHELL_COMMAND_HELP_HINT: &str = "Example: !ls";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 2] = ["model-with-reasoning", "current-dir"];
+const GPT_5_3_SPARK_MODEL: &str = "gpt-5.3-codex-spark";
 // Track information about an in-flight exec command.
 struct RunningCommand {
     command: Vec<String>,
@@ -5098,6 +5099,59 @@ impl ChatWidget {
                 InputResult::CommandWithArgs(cmd, args, text_elements) => {
                     self.handle_slash_command_with_args_dispatch(cmd, args, text_elements);
                 }
+                InputResult::SubmittedWithOverrides {
+                    text,
+                    text_elements,
+                    use_spark_model,
+                    effort_override,
+                } => {
+                    let local_images = self
+                        .bottom_pane
+                        .take_recent_submission_images_with_placeholders();
+                    if text.is_empty()
+                        && local_images.is_empty()
+                        && !self.bottom_pane.remote_image_urls().is_empty()
+                    {
+                        return;
+                    }
+                    let remote_image_urls = self.take_remote_image_urls();
+                    let user_message = UserMessage {
+                        text,
+                        local_images,
+                        remote_image_urls,
+                        text_elements,
+                        mention_bindings: self
+                            .bottom_pane
+                            .take_recent_submission_mention_bindings(),
+                    };
+                    if user_message.text.is_empty()
+                        && user_message.local_images.is_empty()
+                        && user_message.remote_image_urls.is_empty()
+                    {
+                        return;
+                    }
+                    let Some(user_message) =
+                        self.maybe_defer_user_message_for_realtime(user_message)
+                    else {
+                        return;
+                    };
+                    let should_submit_now =
+                        self.is_session_configured() && !self.is_plan_streaming_in_tui();
+                    if should_submit_now {
+                        // Submitted is emitted when user submits.
+                        // Reset any reasoning header only when we are actually submitting a turn.
+                        self.reasoning_buffer.clear();
+                        self.full_reasoning_buffer.clear();
+                        self.set_status_header(String::from("Working"));
+                        self.submit_user_message_with_overrides(
+                            user_message,
+                            use_spark_model.then_some(GPT_5_3_SPARK_MODEL.to_string()),
+                            effort_override,
+                        );
+                    } else {
+                        self.queue_user_message(user_message);
+                    }
+                }
                 InputResult::None => {}
             },
         }
@@ -5291,6 +5345,15 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        self.submit_user_message_with_overrides(user_message, None, None);
+    }
+
+    fn submit_user_message_with_overrides(
+        &mut self,
+        user_message: UserMessage,
+        model_override: Option<String>,
+        effort_override: Option<ReasoningEffortConfig>,
+    ) {
         if !self.is_session_configured() {
             tracing::warn!("cannot submit user message before session is configured; queueing");
             self.queued_user_messages.push_front(user_message);
@@ -5464,7 +5527,11 @@ impl ChatWidget {
             }
         }
 
-        let effective_mode = self.effective_collaboration_mode();
+        let effective_mode = self.effective_collaboration_mode().with_updates(
+            model_override,
+            effort_override.map(Some),
+            None,
+        );
         if effective_mode.model().trim().is_empty() {
             self.add_error_message(
                 "Thread model is unavailable. Wait for the thread to finish syncing or choose a model before sending input.".to_string(),

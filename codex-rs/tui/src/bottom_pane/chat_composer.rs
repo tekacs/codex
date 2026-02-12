@@ -203,6 +203,7 @@ use crate::ui_consts::LIVE_PREFIX_COLS;
 use codex_chatgpt::connectors;
 use codex_chatgpt::connectors::AppInfo;
 use codex_file_search::FileMatch;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -227,6 +228,12 @@ pub enum InputResult {
     Submitted {
         text: String,
         text_elements: Vec<TextElement>,
+    },
+    SubmittedWithOverrides {
+        text: String,
+        text_elements: Vec<TextElement>,
+        use_spark_model: bool,
+        effort_override: Option<ReasoningEffortConfig>,
     },
     Queued {
         text: String,
@@ -1235,6 +1242,15 @@ impl ChatComposer {
             return (InputResult::None, false);
         }
 
+        // Modified Enter (Ctrl/Alt/Cmd) always uses submit semantics, even when a popup is open.
+        if key_event.code == KeyCode::Enter
+            && (key_event.modifiers.contains(KeyModifiers::SUPER)
+                || has_ctrl_or_alt(key_event.modifiers))
+        {
+            let result = self.handle_key_event_without_popup(key_event);
+            self.sync_popups();
+            return result;
+        }
         let result = match &mut self.active_popup {
             ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
             ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
@@ -2195,6 +2211,71 @@ impl ChatComposer {
         self.handle_submission_with_time(should_queue, Instant::now())
     }
 
+    fn handle_submission_with_overrides(
+        &mut self,
+        should_queue: bool,
+        use_spark_model: bool,
+        effort_override: Option<ReasoningEffortConfig>,
+    ) -> (InputResult, bool) {
+        let (result, handled) = self.handle_submission_with_time(should_queue, Instant::now());
+        if !use_spark_model && effort_override.is_none() {
+            return (result, handled);
+        }
+        let InputResult::Submitted {
+            text,
+            text_elements,
+        } = result
+        else {
+            return (result, handled);
+        };
+        (
+            InputResult::SubmittedWithOverrides {
+                text,
+                text_elements,
+                use_spark_model,
+                effort_override,
+            },
+            handled,
+        )
+    }
+
+    fn submission_overrides_from_enter_modifiers(
+        &self,
+        modifiers: KeyModifiers,
+    ) -> (bool, Option<ReasoningEffortConfig>) {
+        if modifiers.contains(KeyModifiers::SUPER) {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                return (
+                    true,
+                    if modifiers.contains(KeyModifiers::ALT) {
+                        Some(ReasoningEffortConfig::XHigh)
+                    } else {
+                        Some(ReasoningEffortConfig::High)
+                    },
+                );
+            }
+            return (true, None);
+        }
+
+        if modifiers.contains(KeyModifiers::CONTROL) {
+            return (
+                false,
+                if modifiers.contains(KeyModifiers::ALT) {
+                    Some(ReasoningEffortConfig::XHigh)
+                } else {
+                    Some(ReasoningEffortConfig::High)
+                },
+            );
+        }
+
+        if modifiers.contains(KeyModifiers::ALT) {
+            // Alt+Enter is treated as the extra-high normal-model shortcut.
+            return (false, Some(ReasoningEffortConfig::XHigh));
+        }
+
+        (false, None)
+    }
+
     fn handle_submission_with_time(
         &mut self,
         should_queue: bool,
@@ -2609,11 +2690,28 @@ impl ChatComposer {
                 kind: KeyEventKind::Press,
                 ..
             } if !self.is_bang_shell_command() => self.handle_submission(self.is_task_running),
-            KeyEvent {
+            key_event @ KeyEvent {
                 code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
+                modifiers,
                 ..
-            } => self.handle_submission(/*should_queue*/ false),
+            } => {
+                if modifiers == KeyModifiers::NONE {
+                    return self.handle_submission(/*should_queue*/ false);
+                }
+                let mut override_modifiers = modifiers;
+                override_modifiers.remove(KeyModifiers::SHIFT);
+                let (use_spark_model, effort_override) =
+                    self.submission_overrides_from_enter_modifiers(override_modifiers);
+                if use_spark_model || effort_override.is_some() {
+                    self.handle_submission_with_overrides(
+                        /*should_queue*/ false,
+                        use_spark_model,
+                        effort_override,
+                    )
+                } else {
+                    self.handle_input_basic(key_event)
+                }
+            }
             input => self.handle_input_basic(input),
         }
     }
@@ -6228,6 +6326,9 @@ mod tests {
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch, but composer queued literal text")
             }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
+            }
             InputResult::None => panic!("expected Command result for '/init'"),
         }
         assert!(composer.textarea.is_empty(), "composer should be cleared");
@@ -6406,6 +6507,9 @@ mod tests {
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch after Tab completion, got literal queue")
             }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
+            }
             InputResult::None => panic!("expected Command result for '/diff'"),
         }
         assert!(composer.textarea.is_empty());
@@ -6572,6 +6676,9 @@ mod tests {
             }
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch, but composer queued literal text")
+            }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
             }
             InputResult::None => panic!("expected Command result for '/mention'"),
         }
