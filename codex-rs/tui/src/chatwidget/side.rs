@@ -11,7 +11,12 @@ impl ChatWidget {
         &mut self,
         user_message: UserMessage,
     ) -> Option<AppCommand> {
-        self.submit_user_message_with_shell_escape_policy(user_message, ShellEscapePolicy::Disallow)
+        self.submit_user_message_with_shell_escape_policy(
+            user_message,
+            None,
+            None,
+            ShellEscapePolicy::Disallow,
+        )
     }
 
     pub(crate) fn set_side_conversation_active(&mut self, active: bool) {
