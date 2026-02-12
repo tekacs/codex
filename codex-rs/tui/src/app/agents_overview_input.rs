@@ -28,7 +28,9 @@ impl AgentsOverviewView {
         }
         let (result, _) = composer.handle_key_event(key);
         drop(state);
-        if let InputResult::Submitted { text, .. } = result {
+        if let InputResult::Submitted { text, .. }
+        | InputResult::SubmittedWithOverrides { text, .. } = result
+        {
             self.app_event_tx
                 .send(AppEvent::DispatchAgentsOverviewTask {
                     prompt: text,

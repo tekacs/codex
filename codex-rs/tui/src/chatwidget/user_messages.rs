@@ -19,6 +19,7 @@ use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::models::local_image_label_text;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 use codex_utils_plugins::mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
@@ -58,19 +59,44 @@ pub(super) enum ShellEscapePolicy {
     Disallow,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct UserTurnOverrides {
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<ReasoningEffortConfig>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct QueuedUserMessage {
     pub(super) user_message: UserMessage,
     pub(super) action: QueuedInputAction,
     pub(super) pending_pastes: Vec<(String, String)>,
+    pub(super) overrides: UserTurnOverrides,
 }
 
 impl QueuedUserMessage {
     pub(super) fn new(user_message: UserMessage, action: QueuedInputAction) -> Self {
+        Self::new_with_overrides(user_message, action, UserTurnOverrides::default())
+    }
+
+    pub(super) fn new_with_overrides(
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        overrides: UserTurnOverrides,
+    ) -> Self {
+        Self::new_with_pending_and_overrides(user_message, action, Vec::new(), overrides)
+    }
+
+    pub(super) fn new_with_pending_and_overrides(
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        pending_pastes: Vec<(String, String)>,
+        overrides: UserTurnOverrides,
+    ) -> Self {
         Self {
             user_message,
             action,
-            pending_pastes: Vec::new(),
+            pending_pastes,
+            overrides,
         }
     }
 

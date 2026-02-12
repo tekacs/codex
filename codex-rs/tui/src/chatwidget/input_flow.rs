@@ -23,35 +23,22 @@ impl ChatWidget {
                 text_elements,
             } => {
                 let user_message = self.user_message_from_submission(text, text_elements);
-                if user_message.text.is_empty()
-                    && user_message.local_images.is_empty()
-                    && user_message.remote_image_urls.is_empty()
-                {
-                    return;
-                }
-                let should_submit_now = self.is_session_configured()
-                    && !self.is_plan_streaming_in_tui()
-                    && !self.input_queue.suppress_queue_autosend
-                    && !self.input_queue.rate_limit_recovery_pending
-                    && (!self.input_queue.user_turn_pending_start
-                        || self.turn_lifecycle.agent_turn_running);
-                if should_submit_now {
-                    if self.only_user_shell_commands_running()
-                        && !user_message.text.starts_with('!')
-                    {
-                        self.queue_user_message(user_message);
-                        return;
-                    }
-                    // Submitted is emitted when user submits.
-                    // Reset any reasoning header only when we are actually submitting a turn.
-                    self.reasoning_buffer.clear();
-                    self.reasoning_header = None;
-                    self.reasoning_summary_parts.clear();
-                    self.set_status_header(String::from("Working"));
-                    self.submit_user_message(user_message);
-                } else {
-                    self.queue_user_message(user_message);
-                }
+                self.handle_submitted_user_message(user_message, UserTurnOverrides::default());
+            }
+            InputResult::SubmittedWithOverrides {
+                text,
+                text_elements,
+                use_spark_model,
+                effort_override,
+            } => {
+                let user_message = self.user_message_from_submission(text, text_elements);
+                self.handle_submitted_user_message(
+                    user_message,
+                    UserTurnOverrides {
+                        model: use_spark_model.then(|| GPT_5_3_SPARK_MODEL.to_string()),
+                        effort: effort_override,
+                    },
+                );
             }
             InputResult::Queued {
                 text,
@@ -95,6 +82,49 @@ impl ChatWidget {
         }
     }
 
+    fn handle_submitted_user_message(
+        &mut self,
+        user_message: UserMessage,
+        overrides: UserTurnOverrides,
+    ) {
+        if user_message.text.is_empty()
+            && user_message.local_images.is_empty()
+            && user_message.remote_image_urls.is_empty()
+        {
+            return;
+        }
+        let should_submit_now = self.is_session_configured()
+            && !self.is_plan_streaming_in_tui()
+            && !self.input_queue.suppress_queue_autosend
+            && !self.input_queue.rate_limit_recovery_pending
+            && (!self.input_queue.user_turn_pending_start
+                || self.turn_lifecycle.agent_turn_running);
+        if should_submit_now {
+            if self.only_user_shell_commands_running() && !user_message.text.starts_with('!') {
+                self.queue_user_message_with_options_and_overrides(
+                    user_message,
+                    QueuedInputAction::Plain,
+                    Vec::new(),
+                    overrides,
+                );
+                return;
+            }
+            // Submitted is emitted when user submits.
+            // Reset any reasoning header only when we are actually submitting a turn.
+            self.reasoning_buffer.clear();
+            self.reasoning_header = None;
+            self.reasoning_summary_parts.clear();
+            self.set_status_header(String::from("Working"));
+            self.submit_user_message_with_overrides(user_message, overrides);
+        } else {
+            self.queue_user_message_with_options_and_overrides(
+                user_message,
+                QueuedInputAction::Plain,
+                Vec::new(),
+                overrides,
+            );
+        }
+    }
     pub(super) fn queue_user_message(&mut self, user_message: UserMessage) {
         self.queue_user_message_with_options(user_message, QueuedInputAction::Plain, Vec::new());
     }
@@ -110,6 +140,21 @@ impl ChatWidget {
         action: QueuedInputAction,
         pending_pastes: Vec<(String, String)>,
     ) {
+        self.queue_user_message_with_options_and_overrides(
+            user_message,
+            action,
+            pending_pastes,
+            UserTurnOverrides::default(),
+        );
+    }
+
+    fn queue_user_message_with_options_and_overrides(
+        &mut self,
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        pending_pastes: Vec<(String, String)>,
+        overrides: UserTurnOverrides,
+    ) {
         if self.has_misalignment_policy_violation() {
             return;
         }
@@ -118,13 +163,14 @@ impl ChatWidget {
             && !self.input_queue.suppress_queue_autosend
             && !self.input_queue.rate_limit_recovery_pending;
         if !should_run_now || action != QueuedInputAction::Plain {
-            self.input_queue
-                .queued_user_messages
-                .push_back(QueuedUserMessage {
+            self.input_queue.queued_user_messages.push_back(
+                QueuedUserMessage::new_with_pending_and_overrides(
                     user_message,
                     action,
                     pending_pastes,
-                });
+                    overrides,
+                ),
+            );
             self.input_queue
                 .queued_user_message_history_records
                 .push_back(UserMessageHistoryRecord::UserMessageText);
@@ -133,7 +179,7 @@ impl ChatWidget {
                 self.maybe_send_next_queued_input();
             }
         } else {
-            self.submit_user_message(user_message);
+            self.submit_user_message_with_overrides(user_message, overrides);
         }
     }
 
@@ -160,10 +206,17 @@ impl ChatWidget {
             };
             match queued_message.action {
                 QueuedInputAction::Plain => {
-                    submitted_follow_up = self.submit_user_message_with_history_record(
-                        queued_message.into_user_message(),
-                        history_record,
-                    );
+                    let QueuedUserMessage {
+                        user_message,
+                        overrides,
+                        ..
+                    } = queued_message;
+                    submitted_follow_up = self
+                        .submit_user_message_with_history_record_and_overrides(
+                            user_message,
+                            history_record,
+                            overrides,
+                        );
                     break;
                 }
                 QueuedInputAction::Literal => {
@@ -216,7 +269,8 @@ impl ChatWidget {
                     }
                 }
                 QueuedInputAction::RunShell => {
-                    let drain = self.submit_queued_shell_prompt(queued_message.into_user_message());
+                    let user_message = queued_message.into_user_message();
+                    let drain = self.submit_queued_shell_prompt(user_message);
                     if drain == QueueDrain::Stop {
                         submitted_follow_up = self.is_user_turn_pending_or_running();
                         break;

@@ -352,6 +352,7 @@ use codex_file_search::FileMatch;
 #[cfg(test)]
 use codex_plugin::AppConnectorId;
 use codex_plugin::PluginCapabilitySummary;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -380,6 +381,12 @@ pub enum InputResult {
     Submitted {
         text: String,
         text_elements: Vec<TextElement>,
+    },
+    SubmittedWithOverrides {
+        text: String,
+        text_elements: Vec<TextElement>,
+        use_spark_model: bool,
+        effort_override: Option<ReasoningEffortConfig>,
     },
     Queued {
         text: String,
@@ -2035,6 +2042,17 @@ impl ChatComposer {
             return self.handle_input_basic(key_event);
         }
 
+        // Modified Enter (Ctrl/Alt/Cmd) always uses submit semantics, even when a popup is open.
+        if key_event.code == KeyCode::Enter
+            && (key_event.modifiers.contains(KeyModifiers::SUPER)
+                || has_ctrl_or_alt(key_event.modifiers))
+        {
+            let result = self.handle_key_event_without_popup(key_event);
+            self.reset_vim_mode_after_successful_dispatch(&result.0);
+            self.sync_popups();
+            return result;
+        }
+
         if self.history_search.is_some() {
             return self.handle_history_search_key(key_event);
         }
@@ -3201,6 +3219,7 @@ impl ChatComposer {
         if matches!(
             result,
             InputResult::Submitted { .. }
+                | InputResult::SubmittedWithOverrides { .. }
                 | InputResult::Queued { .. }
                 | InputResult::Command(_)
                 | InputResult::ServiceTierCommand(_)
@@ -3209,6 +3228,71 @@ impl ChatComposer {
             self.vim_history = VimHistory::default();
             self.draft.textarea.enter_vim_insert_mode();
         }
+    }
+
+    fn handle_submission_with_overrides(
+        &mut self,
+        should_queue: bool,
+        use_spark_model: bool,
+        effort_override: Option<ReasoningEffortConfig>,
+    ) -> (InputResult, bool) {
+        let (result, handled) = self.handle_submission_with_time(should_queue, Instant::now());
+        if !use_spark_model && effort_override.is_none() {
+            return (result, handled);
+        }
+        let InputResult::Submitted {
+            text,
+            text_elements,
+        } = result
+        else {
+            return (result, handled);
+        };
+        (
+            InputResult::SubmittedWithOverrides {
+                text,
+                text_elements,
+                use_spark_model,
+                effort_override,
+            },
+            handled,
+        )
+    }
+
+    fn submission_overrides_from_enter_modifiers(
+        &self,
+        modifiers: KeyModifiers,
+    ) -> (bool, Option<ReasoningEffortConfig>) {
+        if modifiers.contains(KeyModifiers::SUPER) {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                return (
+                    true,
+                    if modifiers.contains(KeyModifiers::ALT) {
+                        Some(ReasoningEffortConfig::XHigh)
+                    } else {
+                        Some(ReasoningEffortConfig::High)
+                    },
+                );
+            }
+            return (true, None);
+        }
+
+        if modifiers.contains(KeyModifiers::CONTROL) {
+            return (
+                false,
+                if modifiers.contains(KeyModifiers::ALT) {
+                    Some(ReasoningEffortConfig::XHigh)
+                } else {
+                    Some(ReasoningEffortConfig::High)
+                },
+            );
+        }
+
+        if modifiers.contains(KeyModifiers::ALT) {
+            // Alt+Enter is treated as the extra-high normal-model shortcut.
+            return (false, Some(ReasoningEffortConfig::XHigh));
+        }
+
+        (false, None)
     }
 
     fn handle_submission_with_time(
@@ -3605,22 +3689,41 @@ impl ChatComposer {
                 self.editor_keymap.move_down.is_pressed(key_event),
             )
         };
-        if history_up_pressed || history_down_pressed {
-            if self
+        if (history_up_pressed || history_down_pressed)
+            && self
                 .history
                 .should_handle_navigation(&self.current_text(), self.history_navigation_cursor())
-            {
-                let replace_entry = if history_up_pressed {
-                    self.history.navigate_up(&self.app_event_tx)
-                } else {
-                    self.history.navigate_down(&self.app_event_tx)
-                };
-                if let Some(entry) = replace_entry {
-                    self.apply_history_entry(entry);
-                    return (InputResult::None, true);
-                }
+        {
+            let replace_entry = if history_up_pressed {
+                self.history.navigate_up(&self.app_event_tx)
+            } else {
+                self.history.navigate_down(&self.app_event_tx)
+            };
+            if let Some(entry) = replace_entry {
+                self.apply_history_entry(entry);
+                return (InputResult::None, true);
             }
-            return self.handle_input_basic(key_event);
+        }
+
+        // Modified Enter (Ctrl/Alt/Cmd) submits with model/effort overrides.
+        if let KeyEvent {
+            code: KeyCode::Enter,
+            modifiers,
+            ..
+        } = key_event
+            && modifiers != KeyModifiers::NONE
+        {
+            let mut override_modifiers = modifiers;
+            override_modifiers.remove(KeyModifiers::SHIFT);
+            let (use_spark_model, effort_override) =
+                self.submission_overrides_from_enter_modifiers(override_modifiers);
+            if use_spark_model || effort_override.is_some() {
+                return self.handle_submission_with_overrides(
+                    /*should_queue*/ false,
+                    use_spark_model,
+                    effort_override,
+                );
+            }
         }
 
         self.handle_input_basic(key_event)
@@ -9894,6 +9997,9 @@ mod tests {
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
             }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
+            }
             InputResult::None => panic!("expected Command result for '/init'"),
         }
         assert!(
@@ -10404,6 +10510,9 @@ mod tests {
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
             }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
+            }
             InputResult::None => panic!("expected Command result for '/diff'"),
         }
         assert!(composer.draft.textarea.is_empty());
@@ -10603,6 +10712,9 @@ mod tests {
             }
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
+            }
+            InputResult::SubmittedWithOverrides { .. } => {
+                panic!("expected command dispatch, but composer submitted with overrides")
             }
             InputResult::None => panic!("expected Command result for '/mention'"),
         }

@@ -75,10 +75,20 @@ impl ChatWidget {
     }
 
     pub(super) fn submit_user_message(&mut self, user_message: UserMessage) {
-        let _accepted = self.submit_user_message_with_history_record(
+        let _accepted =
+            self.submit_user_message_with_overrides(user_message, UserTurnOverrides::default());
+    }
+
+    pub(super) fn submit_user_message_with_overrides(
+        &mut self,
+        user_message: UserMessage,
+        overrides: UserTurnOverrides,
+    ) -> bool {
+        self.submit_user_message_with_history_record_and_overrides(
             user_message,
             UserMessageHistoryRecord::UserMessageText,
-        );
+            overrides,
+        )
     }
 
     pub(super) fn submit_user_message_with_history_record(
@@ -86,10 +96,24 @@ impl ChatWidget {
         user_message: UserMessage,
         history_record: UserMessageHistoryRecord,
     ) -> bool {
+        self.submit_user_message_with_history_record_and_overrides(
+            user_message,
+            history_record,
+            UserTurnOverrides::default(),
+        )
+    }
+
+    pub(super) fn submit_user_message_with_history_record_and_overrides(
+        &mut self,
+        user_message: UserMessage,
+        history_record: UserMessageHistoryRecord,
+        overrides: UserTurnOverrides,
+    ) -> bool {
         self.submit_user_message_with_history_and_shell_escape_policy(
             user_message,
             history_record,
             ShellEscapePolicy::Allow,
+            overrides,
         )
         .0
     }
@@ -103,6 +127,7 @@ impl ChatWidget {
             user_message,
             UserMessageHistoryRecord::UserMessageText,
             shell_escape_policy,
+            UserTurnOverrides::default(),
         )
         .1
     }
@@ -112,6 +137,7 @@ impl ChatWidget {
         user_message: UserMessage,
         history_record: UserMessageHistoryRecord,
         shell_escape_policy: ShellEscapePolicy,
+        overrides: UserTurnOverrides,
     ) -> (bool, Option<AppCommand>) {
         if self.has_misalignment_policy_violation() {
             return (false, None);
@@ -128,9 +154,13 @@ impl ChatWidget {
         }
         if !self.is_session_configured() {
             tracing::warn!("cannot submit user message before session is configured; queueing");
-            self.input_queue
-                .queued_user_messages
-                .push_front(QueuedUserMessage::from(user_message));
+            self.input_queue.queued_user_messages.push_front(
+                QueuedUserMessage::new_with_overrides(
+                    user_message,
+                    QueuedInputAction::Plain,
+                    overrides,
+                ),
+            );
             self.input_queue
                 .queued_user_message_history_records
                 .push_front(history_record);
@@ -319,7 +349,11 @@ impl ChatWidget {
             }
         }
 
-        let effective_mode = self.effective_collaboration_mode();
+        let effective_mode = self.effective_collaboration_mode().with_updates(
+            overrides.model,
+            overrides.effort.map(Some),
+            /*developer_instructions*/ None,
+        );
         if effective_mode.model().trim().is_empty() {
             self.add_error_message(
                 "Thread model is unavailable. Wait for the thread to finish syncing or choose a model before sending input.".to_string(),
