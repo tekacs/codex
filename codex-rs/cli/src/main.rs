@@ -133,6 +133,10 @@ struct MultitoolCli {
     #[clap(flatten)]
     pub feature_toggles: FeatureToggles,
 
+    /// Allow running Codex outside a Git repository.
+    #[arg(long = "skip-git-repo-check", default_value_t = false)]
+    pub skip_git_repo_check: bool,
+
     #[clap(flatten)]
     remote: InteractiveRemoteOptions,
 
@@ -1141,6 +1145,7 @@ async fn cli_main(
     let MultitoolCli {
         config_overrides: mut root_config_overrides,
         feature_toggles,
+        skip_git_repo_check,
         remote,
         mut interactive,
         subcommand,
@@ -1264,6 +1269,7 @@ async fn cli_main(
                 .inherit_exec_root_options(&interactive.shared);
             exec_cli.command = Some(ExecCommand::Review(review_args));
             exec_cli.strict_config = strict_config || root_strict_config;
+            exec_cli.skip_git_repo_check = skip_git_repo_check;
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
@@ -3167,6 +3173,7 @@ mod tests {
             config_overrides: mut root_overrides,
             subcommand,
             feature_toggles: _,
+            skip_git_repo_check: _,
             remote: _,
         } = cli;
         interactive
@@ -3204,6 +3211,7 @@ mod tests {
             config_overrides: mut root_overrides,
             subcommand,
             feature_toggles: _,
+            skip_git_repo_check: _,
             remote: _,
         } = cli;
         interactive
