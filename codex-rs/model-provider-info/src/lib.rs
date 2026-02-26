@@ -238,10 +238,15 @@ impl ModelProviderInfo {
         } else {
             "https://api.openai.com/v1"
         };
-        let base_url = self
-            .base_url
-            .clone()
-            .unwrap_or_else(|| default_base_url.to_string());
+        let base_url = if matches!(auth_mode, Some(AuthMode::Chatgpt)) {
+            std::env::var("CHATGPT_BASE_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        } else {
+            None
+        }
+        .or_else(|| self.base_url.clone())
+        .unwrap_or_else(|| default_base_url.to_string());
 
         let headers = self.build_header_map()?;
         let retry = ApiRetryConfig {
