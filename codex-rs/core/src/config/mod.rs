@@ -1018,6 +1018,9 @@ pub struct Config {
     /// When set, restricts the login mechanism users may use.
     pub forced_login_method: Option<ForcedLoginMethod>,
 
+    /// Policy controlling which built-in tools are available for a session.
+    pub builtin_tool_policy: BuiltinToolPolicy,
+
     /// Explicit or feature-derived web search mode.
     pub web_search_mode: Constrained<WebSearchMode>,
 
@@ -1099,6 +1102,14 @@ pub struct Config {
     /// Optional override for the session thread ID, set by external harnesses
     /// (e.g. agent-fixes) so they know the session ID from creation time.
     pub session_id_override: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuiltinToolPolicy {
+    #[default]
+    Default,
+    NoTools,
+    WebOnly,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -2594,6 +2605,7 @@ pub struct ConfigOverrides {
     pub developer_instructions: Option<String>,
     pub personality: Option<Personality>,
     pub compact_prompt: Option<String>,
+    pub builtin_tool_policy: Option<BuiltinToolPolicy>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
@@ -3256,6 +3268,7 @@ impl Config {
             developer_instructions,
             personality,
             compact_prompt,
+            builtin_tool_policy: builtin_tool_policy_override,
             show_raw_agent_reasoning,
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
@@ -4313,6 +4326,7 @@ impl Config {
             experimental_thread_store: thread_store_config(cfg.experimental_thread_store),
             forced_chatgpt_workspace_id,
             forced_login_method,
+            builtin_tool_policy: builtin_tool_policy_override.unwrap_or_default(),
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
             experimental_request_user_input_enabled,
