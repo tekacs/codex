@@ -1,5 +1,6 @@
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
+use crate::config::BuiltinToolPolicy;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::image_preparation::unified_image_budget_enabled;
 use crate::session::session::Session;
@@ -630,11 +631,13 @@ fn hosted_model_tool_specs(
     }
 
     let mut specs = Vec::new();
-    let standalone_web_search_available = standalone_web_search_enabled(turn_context, model_info)
+    let standalone_web_search_available = hosted_web_search_enabled(turn_context)
+        && standalone_web_search_enabled(turn_context, model_info)
         && registered_extension_tool_names.contains(&ToolName::namespaced("web", "run"));
     // `Some(Cached/Live/Disabled)` are the options for mode when standalone search is unavailable
     // and the provider supports hosted search. `None` prevents emitting a hosted search tool.
-    let web_search_mode = (!standalone_web_search_available
+    let web_search_mode = (hosted_web_search_enabled(turn_context)
+        && !standalone_web_search_available
         && turn_context.provider.capabilities().web_search)
         .then_some(turn_context.config.web_search_mode.value());
     let web_search_config = web_search_mode
@@ -651,7 +654,9 @@ fn hosted_model_tool_specs(
 }
 
 pub(crate) fn search_tool_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
-    model_info.supports_search_tool && namespace_tools_enabled(turn_context)
+    builtin_tools_enabled(turn_context)
+        && model_info.supports_search_tool
+        && namespace_tools_enabled(turn_context)
 }
 
 pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
@@ -663,6 +668,20 @@ pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
 
 fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
     turn_context.provider.capabilities().namespace_tools
+}
+
+fn builtin_tools_enabled(turn_context: &TurnContext) -> bool {
+    matches!(
+        turn_context.config.builtin_tool_policy,
+        BuiltinToolPolicy::Default
+    )
+}
+
+fn hosted_web_search_enabled(turn_context: &TurnContext) -> bool {
+    !matches!(
+        turn_context.config.builtin_tool_policy,
+        BuiltinToolPolicy::NoTools
+    )
 }
 
 fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
@@ -1014,6 +1033,9 @@ fn code_mode_namespace_descriptions(
 
 #[instrument(level = "trace", skip_all)]
 fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
+    if !builtin_tools_enabled(context.turn_context) {
+        return;
+    }
     // The startup ceiling applies to the thread and every selected environment.
     if context.tool_policy.require_managed_sandbox
         && (!matches!(
