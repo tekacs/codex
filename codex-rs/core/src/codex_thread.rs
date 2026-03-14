@@ -175,7 +175,7 @@ pub struct GuardianRootSnapshot {
 }
 
 pub struct CodexThread {
-    pub(crate) session: Arc<Session>,
+    pub session: Arc<Session>,
     pub(crate) io: SessionIo,
     pub(crate) session_source: SessionSource,
     session_configured: SessionConfiguredEvent,

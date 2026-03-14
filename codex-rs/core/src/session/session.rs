@@ -39,7 +39,7 @@ use tokio::sync::Semaphore;
 /// Context for an initialized model agent
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
-pub(crate) struct Session {
+pub struct Session {
     pub(crate) thread_id: ThreadId,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,

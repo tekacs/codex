@@ -536,7 +536,7 @@ impl Session {
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
     )]
-    pub async fn request_mcp_server_elicitation(
+    pub(crate) async fn request_mcp_server_elicitation(
         &self,
         turn_context: &TurnContext,
         server_name: String,
