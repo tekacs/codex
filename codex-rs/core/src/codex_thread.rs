@@ -187,7 +187,7 @@ pub struct GuardianRootSnapshot {
 }
 
 pub struct CodexThread {
-    pub(crate) session: Arc<Session>,
+    pub session: Arc<Session>,
     pub(crate) io: SessionIo,
     // Queued agent mail owns a read guard until handled or dropped; eviction needs a write guard.
     pub(crate) residency_gate: Arc<RwLock<()>>,
