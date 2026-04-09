@@ -117,7 +117,7 @@ pub struct Cli {
 
     /// Internal: override the session thread ID with a pre-generated UUID.
     /// Used by agent-fixes to know the session ID from creation time.
-    #[arg(long = "session-id", value_name = "UUID", hide = true)]
+    #[arg(long = "session-id", value_name = "UUID")]
     pub session_id: Option<String>,
 
     #[clap(skip)]
