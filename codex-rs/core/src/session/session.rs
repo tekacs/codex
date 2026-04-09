@@ -91,6 +91,8 @@ pub(crate) struct SessionConfiguration {
     pub(super) persist_extended_history: bool,
     pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(super) user_shell_override: Option<shell::Shell>,
+    /// Optional override for the session thread ID, set by external harnesses.
+    pub(super) session_id_override: Option<String>,
 }
 
 impl SessionConfiguration {
@@ -361,7 +363,11 @@ impl Session {
         };
         let conversation_id = match &initial_history {
             InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => {
-                ThreadId::default()
+                session_configuration
+                    .session_id_override
+                    .as_deref()
+                    .and_then(|s| ThreadId::from_string(s).ok())
+                    .unwrap_or_default()
             }
             InitialHistory::Resumed(resumed_history) => resumed_history.conversation_id,
         };

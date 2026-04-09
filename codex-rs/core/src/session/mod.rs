@@ -618,6 +618,7 @@ impl Codex {
             persist_extended_history,
             inherited_shell_snapshot,
             user_shell_override,
+            session_id_override: config.session_id_override.clone(),
         };
 
         // Generate a unique ID for the lifetime of this Codex session.
