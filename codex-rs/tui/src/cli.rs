@@ -84,6 +84,11 @@ pub struct Cli {
     #[arg(long)]
     pub no_daemon: bool,
 
+    /// Internal: override the session thread ID with a pre-generated UUID.
+    /// Used by agent-fixes to know the session ID from creation time.
+    #[arg(long = "session-id", value_name = "UUID", hide = true)]
+    pub session_id: Option<String>,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 }

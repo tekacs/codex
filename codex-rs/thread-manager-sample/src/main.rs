@@ -387,6 +387,7 @@ async fn new_config(
         feedback_enabled: false,
         tool_suggest: ToolSuggestConfig::default(),
         otel: OtelConfig::default(),
+        session_id_override: None,
     };
     config
         .features

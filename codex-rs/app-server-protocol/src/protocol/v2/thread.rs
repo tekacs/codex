@@ -133,6 +133,10 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.daybreakEnabled")]
     #[ts(optional = nullable)]
     pub daybreak_enabled: Option<bool>,
+    /// Internal harness-only override for the generated thread/session ID.
+    #[experimental("thread/start.sessionIdOverride")]
+    #[ts(optional = nullable)]
+    pub session_id_override: Option<String>,
     /// Optional sticky environments for this thread.
     ///
     /// Omitted selects the default environment when environment access is
@@ -611,6 +615,10 @@ pub struct ThreadForkParams {
     /// Optional client-supplied analytics source classification for this forked thread.
     #[ts(optional = nullable)]
     pub thread_source: Option<ThreadSource>,
+    /// Internal harness-only override for the generated forked thread/session ID.
+    #[experimental("thread/fork.sessionIdOverride")]
+    #[ts(optional = nullable)]
+    pub session_id_override: Option<String>,
     /// When true, return only thread metadata and live fork state without
     /// populating `thread.turns`. This is useful when the client plans to call
     /// `thread/turns/list` immediately after forking. Full-history hydration
