@@ -517,17 +517,27 @@ impl Tui {
         let mut area = terminal.viewport_area;
         area.height = height.min(size.height);
         area.width = size.width;
-        if area.bottom() > size.height {
-            let scroll_by = area.bottom() - size.height;
-            if is_zellij {
-                Self::scroll_zellij_expanded_viewport(terminal, size, scroll_by)?;
-                needs_full_repaint = true;
-            } else {
-                terminal
-                    .backend_mut()
-                    .scroll_region_up(0..area.top(), scroll_by)?;
+        let target_y = size.height.saturating_sub(area.height);
+        if area.y > target_y {
+            // Viewport extends past the bottom of the screen — scroll content
+            // above it upward and pin to bottom.
+            let scroll_by = area.bottom().saturating_sub(size.height);
+            if scroll_by > 0 {
+                if is_zellij {
+                    Self::scroll_zellij_expanded_viewport(terminal, size, scroll_by)?;
+                    needs_full_repaint = true;
+                } else {
+                    terminal
+                        .backend_mut()
+                        .scroll_region_up(0..area.top(), scroll_by)?;
+                }
             }
-            area.y = size.height - area.height;
+            area.y = target_y;
+        } else if area.y < target_y {
+            // Dead space below the viewport after a resize shrink — reclaim it
+            // by sliding the viewport down. No scrolling needed since the rows
+            // below are already empty.
+            area.y = target_y;
         }
         if area != terminal.viewport_area {
             // TODO(nornagon): probably this could be collapsed with the clear + set_viewport_area above.
