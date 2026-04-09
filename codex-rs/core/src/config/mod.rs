@@ -1095,6 +1095,10 @@ pub struct Config {
 
     /// OTEL configuration (exporter type, endpoint, headers, etc.).
     pub otel: codex_config::types::OtelConfig,
+
+    /// Optional override for the session thread ID, set by external harnesses
+    /// (e.g. agent-fixes) so they know the session ID from creation time.
+    pub session_id_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -2599,6 +2603,8 @@ pub struct ConfigOverrides {
     /// Explicit absolute runtime workspace roots for this session. When set,
     /// this is the full runtime root list rather than an additive override.
     pub workspace_roots: Option<Vec<AbsolutePathBuf>>,
+    /// Optional override for the session thread ID.
+    pub session_id_override: Option<String>,
 }
 
 fn dedupe_absolute_paths(paths: &mut Vec<AbsolutePathBuf>) {
@@ -3256,6 +3262,7 @@ impl Config {
             bypass_hook_trust,
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
+            session_id_override,
         } = overrides;
         let bypass_hook_trust = bypass_hook_trust.unwrap_or_default();
 
@@ -4396,6 +4403,7 @@ impl Config {
                 .map(|t| t.keymap.clone())
                 .unwrap_or_default(),
             otel,
+            session_id_override,
         };
         Ok(config)
         })

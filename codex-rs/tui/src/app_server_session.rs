@@ -1963,6 +1963,7 @@ pub(crate) fn thread_start_params_from_config(
         developer_instructions: with_terminal_visualization_instructions(
             config, /*control_instructions*/ None,
         ),
+        session_id_override: config.session_id_override.clone(),
         ..ThreadStartParams::default()
     }
 }
@@ -2067,6 +2068,7 @@ fn thread_fork_params_from_config(
         ),
         ephemeral: config.ephemeral,
         thread_source: Some(ThreadSource::User),
+        session_id_override: config.session_id_override.clone(),
         ..ThreadForkParams::default()
     }
 }
@@ -2810,6 +2812,40 @@ mod tests {
         );
 
         assert_eq!(params.session_start_source, Some(ThreadStartSource::Clear));
+    }
+
+    #[tokio::test]
+    async fn thread_lifecycle_params_forward_session_id_override() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let override_id = "67e55044-10b1-426f-9247-bb680e5fe0c7".to_string();
+        let config = ConfigBuilder::default()
+            .codex_home(temp_dir.path().to_path_buf())
+            .harness_overrides(ConfigOverrides {
+                session_id_override: Some(override_id.clone()),
+                ..ConfigOverrides::default()
+            })
+            .build()
+            .await
+            .expect("config should build");
+        let source_thread_id = ThreadId::new();
+
+        let start = thread_start_params_from_config(
+            &config,
+            ThreadParamsMode::Embedded,
+            /*remote_cwd_override*/ None,
+            /*session_start_source*/ None,
+        );
+        let fork = thread_fork_params_from_config(
+            config,
+            source_thread_id,
+            ThreadParamsMode::Embedded,
+            /*remote_cwd_override*/ None,
+        );
+
+        assert_eq!(
+            (start.session_id_override, fork.session_id_override),
+            (Some(override_id.clone()), Some(override_id))
+        );
     }
 
     #[test]

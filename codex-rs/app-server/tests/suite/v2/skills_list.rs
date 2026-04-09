@@ -1393,6 +1393,7 @@ async fn skills_changed_notification_is_emitted_after_skill_change() -> Result<(
             session_start_source: None,
             thread_source: None,
             project_id: None,
+            session_id_override: None,
             dynamic_tools: None,
             environments: None,
             selected_capability_roots: None,

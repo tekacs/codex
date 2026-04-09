@@ -633,6 +633,30 @@ async fn thread_start_excludes_profile_workspace_roots_from_runtime_workspace_ro
 }
 
 #[tokio::test]
+async fn thread_start_respects_session_id_override() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    let override_id = "67e55044-10b1-426f-9247-bb680e5fe0c7".to_string();
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            session_id_override: Some(override_id.clone()),
+            ..Default::default()
+        })
+        .await?;
+
+    assert_eq!(
+        (thread.id.as_str(), thread.session_id.as_str()),
+        (override_id.as_str(), override_id.as_str())
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_start_rejects_unknown_environment_as_invalid_request() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
 

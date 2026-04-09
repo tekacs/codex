@@ -37,12 +37,13 @@ async fn stage_pending_thread_metadata(
     thread_manager: &ThreadManager,
     thread_store: &dyn ThreadStore,
     patch: StoreThreadMetadataPatch,
+    reserved_id: Option<ThreadId>,
     operation: &'static str,
 ) -> Result<Option<ThreadId>, JSONRPCErrorError> {
     if patch.is_empty() {
-        return Ok(None);
+        return Ok(reserved_id);
     }
-    let thread_id = thread_manager.reserve_thread_id();
+    let thread_id = reserved_id.unwrap_or_else(|| thread_manager.reserve_thread_id());
     thread_store
         .stage_pending_thread_metadata(thread_id, patch)
         .await
@@ -1153,6 +1154,7 @@ impl ThreadRequestProcessor {
             session_start_source,
             thread_source,
             project_id,
+            session_id_override,
             environments,
         } = params;
         if matches!(
@@ -1204,6 +1206,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
+        typesafe_overrides.session_id_override = session_id_override;
         typesafe_overrides.ephemeral = ephemeral;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
@@ -1440,8 +1443,13 @@ impl ThreadRequestProcessor {
             thread_extension_init.insert(selected_capability_roots);
         }
         let mut start_options = StartThreadOptions::new(config);
+        let reserved_id = start_options
+            .config
+            .session_id_override
+            .as_deref()
+            .and_then(|id| ThreadId::from_string(id).ok());
         let reserved_thread_id = if start_options.config.ephemeral {
-            None
+            reserved_id
         } else {
             stage_pending_thread_metadata(
                 listener_task_context.thread_manager.as_ref(),
@@ -1450,6 +1458,7 @@ impl ThreadRequestProcessor {
                     project_id: project_id.clone().map(Some),
                     ..Default::default()
                 },
+                reserved_id,
                 "thread/start",
             )
             .await?
@@ -4780,6 +4789,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             ephemeral,
             thread_source,
+            session_id_override,
             exclude_turns,
             defer_goal_continuation,
         } = params;
@@ -4917,6 +4927,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             /*personality*/ None,
         );
+        typesafe_overrides.session_id_override = session_id_override;
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()
@@ -5028,8 +5039,12 @@ impl ThreadRequestProcessor {
             .then(|| restored_token_usage_turn_id(&history_items, ephemeral_turns.as_slice()));
         let token_usage_history_items = paginated_source.then(|| Arc::clone(&history_items));
         let inherited_project_id = source_thread.project_id.clone();
+        let reserved_id = config
+            .session_id_override
+            .as_deref()
+            .and_then(|id| ThreadId::from_string(id).ok());
         let reserved_thread_id = if config.ephemeral {
-            None
+            reserved_id
         } else {
             stage_pending_thread_metadata(
                 self.thread_manager.as_ref(),
@@ -5039,6 +5054,7 @@ impl ThreadRequestProcessor {
                     daybreak_enabled: source_thread.daybreak_enabled,
                     ..Default::default()
                 },
+                reserved_id,
                 "thread/fork",
             )
             .await?
