@@ -115,6 +115,11 @@ pub struct Cli {
     #[arg(long = "no-alt-screen", default_value_t = false)]
     pub no_alt_screen: bool,
 
+    /// Internal: override the session thread ID with a pre-generated UUID.
+    /// Used by agent-fixes to know the session ID from creation time.
+    #[arg(long = "session-id", value_name = "UUID", hide = true)]
+    pub session_id: Option<String>,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 }

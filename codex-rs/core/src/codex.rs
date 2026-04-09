@@ -658,6 +658,7 @@ impl Codex {
             persist_extended_history,
             inherited_shell_snapshot,
             user_shell_override,
+            session_id_override: config.session_id_override.clone(),
         };
 
         // Generate a unique ID for the lifetime of this Codex session.
@@ -1175,6 +1176,8 @@ pub(crate) struct SessionConfiguration {
     persist_extended_history: bool,
     inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     user_shell_override: Option<shell::Shell>,
+    /// Optional override for the session thread ID, set by external harnesses.
+    session_id_override: Option<String>,
 }
 
 impl SessionConfiguration {
@@ -1619,7 +1622,31 @@ impl Session {
         let forked_from_id = initial_history.forked_from_id();
 
         let (conversation_id, rollout_params) = match &initial_history {
-            InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => {
+            InitialHistory::New | InitialHistory::Forked(_) => {
+                let conversation_id = session_configuration
+                    .session_id_override
+                    .as_deref()
+                    .and_then(|s| ThreadId::from_string(s).ok())
+                    .unwrap_or_default();
+                (
+                    conversation_id,
+                    RolloutRecorderParams::new(
+                        conversation_id,
+                        forked_from_id,
+                        session_source,
+                        BaseInstructions {
+                            text: session_configuration.base_instructions.clone(),
+                        },
+                        session_configuration.dynamic_tools.clone(),
+                        if session_configuration.persist_extended_history {
+                            EventPersistenceMode::Extended
+                        } else {
+                            EventPersistenceMode::Limited
+                        },
+                    ),
+                )
+            }
+            InitialHistory::Cleared => {
                 let conversation_id = ThreadId::default();
                 (
                     conversation_id,

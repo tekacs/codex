@@ -569,6 +569,10 @@ pub struct Config {
 
     /// OTEL configuration (exporter type, endpoint, headers, etc.).
     pub otel: codex_config::types::OtelConfig,
+
+    /// Optional override for the session thread ID, set by external harnesses
+    /// (e.g. agent-fixes) so they know the session ID from creation time.
+    pub session_id_override: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1234,6 +1238,8 @@ pub struct ConfigOverrides {
     pub ephemeral: Option<bool>,
     /// Additional directories that should be treated as writable roots for this session.
     pub additional_writable_roots: Vec<PathBuf>,
+    /// Optional override for the session thread ID.
+    pub session_id_override: Option<String>,
 }
 
 /// Resolves the OSS provider from CLI override, profile config, or global config.
@@ -1441,6 +1447,7 @@ impl Config {
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
             additional_writable_roots,
+            session_id_override,
         } = overrides;
 
         let active_profile_name = config_profile_key
@@ -2168,6 +2175,7 @@ impl Config {
                     metrics_exporter,
                 }
             },
+            session_id_override,
         };
         Ok(config)
     }
