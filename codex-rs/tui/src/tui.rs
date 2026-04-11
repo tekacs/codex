@@ -534,10 +534,11 @@ impl Tui {
             }
             area.y = target_y;
         } else if area.y < target_y {
-            // Dead space below the viewport after a resize shrink — reclaim it
-            // by sliding the viewport down. No scrolling needed since the rows
-            // below are already empty.
+            // Dead space below the viewport (e.g. after terminal grows or
+            // content shrinks) — slide viewport down to pin to bottom.
+            // Must repaint since clear() wipes the old content.
             area.y = target_y;
+            needs_full_repaint = true;
         }
         if area != terminal.viewport_area {
             // TODO(nornagon): probably this could be collapsed with the clear + set_viewport_area above.
