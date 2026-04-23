@@ -24,6 +24,23 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
 }
 
 #[test]
+fn model_context_window_override_wins_over_max_context_window() {
+    let mut model = model_info_from_slug("unknown-model");
+    model.context_window = Some(273_000);
+    model.max_context_window = Some(400_000);
+    let config = ModelsManagerConfig {
+        model_context_window: Some(500_000),
+        ..Default::default()
+    };
+
+    let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.context_window = Some(500_000);
+
+    assert_eq!(updated, expected);
+}
+
+#[test]
 fn base_instruction_override_is_literal_and_preserves_catalog_messages() {
     let override_instructions = "override {{ personality }}";
     let persistent_instructions = "Follow up on the active task.";
@@ -321,23 +338,6 @@ fn unknown_model_uses_builtin_instruction_template() {
         BASE_INSTRUCTIONS
     );
     assert!(model.used_fallback_model_metadata);
-}
-
-#[test]
-fn model_context_window_override_clamps_to_max_context_window() {
-    let mut model = model_info_from_slug("unknown-model");
-    model.context_window = Some(273_000);
-    model.max_context_window = Some(400_000);
-    let config = ModelsManagerConfig {
-        model_context_window: Some(500_000),
-        ..Default::default()
-    };
-
-    let updated = with_config_overrides(model.clone(), &config);
-    let mut expected = model;
-    expected.context_window = Some(400_000);
-
-    assert_eq!(updated, expected);
 }
 
 #[test]
