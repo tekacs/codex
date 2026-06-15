@@ -192,7 +192,18 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         Box::pin(
             async move {
                 let remote_models = self.get_remote_models().await;
-                construct_model_info_from_candidates(model, &remote_models, config)
+                let mut model_info =
+                    construct_model_info_from_candidates(model, &remote_models, config);
+                if config.model_context_window.is_none()
+                    && model.starts_with("gpt-5.5")
+                    && self.auth_manager().is_some_and(|auth_manager| {
+                        auth_manager.auth_mode() == Some(AuthMode::ApiKey)
+                    })
+                {
+                    model_info.context_window = Some(1_050_000);
+                    model_info.max_context_window = Some(1_050_000);
+                }
+                model_info
             }
             .instrument(tracing::info_span!("get_model_info", model = model)),
         )

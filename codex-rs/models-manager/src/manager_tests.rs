@@ -773,6 +773,45 @@ async fn get_model_info_uses_custom_catalog() {
 }
 
 #[tokio::test]
+async fn get_model_info_uses_api_gpt_5_5_context_window_for_api_key_auth() {
+    let codex_home = tempdir().expect("temp dir");
+    let config = ModelsManagerConfig::default();
+    let manager = openai_manager_for_tests_with_auth(
+        codex_home.path().to_path_buf(),
+        TestModelsEndpoint::without_refresh(Vec::new()),
+        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+            "test-api-key",
+        ))),
+    );
+
+    let model_info = manager.get_model_info("gpt-5.5", &config).await;
+
+    assert_eq!(model_info.context_window, Some(1_050_000));
+    assert_eq!(model_info.max_context_window, Some(1_050_000));
+}
+
+#[tokio::test]
+async fn get_model_info_api_gpt_5_5_bypass_preserves_config_override() {
+    let codex_home = tempdir().expect("temp dir");
+    let config = ModelsManagerConfig {
+        model_context_window: Some(500_000),
+        ..Default::default()
+    };
+    let manager = openai_manager_for_tests_with_auth(
+        codex_home.path().to_path_buf(),
+        TestModelsEndpoint::without_refresh(Vec::new()),
+        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+            "test-api-key",
+        ))),
+    );
+
+    let model_info = manager.get_model_info("gpt-5.5", &config).await;
+
+    assert_eq!(model_info.context_window, Some(500_000));
+    assert_eq!(model_info.max_context_window, Some(272_000));
+}
+
+#[tokio::test]
 async fn get_model_info_matches_namespaced_suffix() {
     let config = ModelsManagerConfig::default();
     let mut remote = remote_model("gpt-image", "Image", /*priority*/ 0);
