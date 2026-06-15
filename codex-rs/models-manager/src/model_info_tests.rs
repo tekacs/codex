@@ -341,13 +341,15 @@ fn unknown_model_uses_builtin_instruction_template() {
 }
 
 #[test]
-fn model_context_window_uses_model_value_without_override() {
+fn model_context_window_defaults_to_max_without_override() {
     let mut model = model_info_from_slug("unknown-model");
     model.context_window = Some(273_000);
     model.max_context_window = Some(400_000);
     let config = ModelsManagerConfig::default();
 
     let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.context_window = Some(400_000);
 
-    assert_eq!(updated, model);
+    assert_eq!(updated, expected);
 }

@@ -25,6 +25,10 @@ const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(context_window);
+    } else if let Some(max_context_window) = model.max_context_window {
+        // Prefer the model's advertised ceiling when the user has not pinned a
+        // smaller runtime window explicitly.
+        model.context_window = Some(max_context_window);
     }
     if let Some(auto_compact_token_limit) = config.model_auto_compact_token_limit {
         model.auto_compact_token_limit = Some(auto_compact_token_limit);

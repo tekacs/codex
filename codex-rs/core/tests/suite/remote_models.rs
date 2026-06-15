@@ -231,9 +231,9 @@ async fn remote_models_get_model_info_uses_longest_matching_prefix() -> Result<(
 
 /// Scenario: the model advertises a default 273k context window and a 400k max
 /// context window, and the user explicitly configures 1M. This verifies the
-/// runtime turn clamps the override to the advertised max window.
+/// runtime turn honors the explicit override instead of treating max as a clamp.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_models_config_context_window_override_clamps_to_max_context_window() -> Result<()> {
+async fn remote_models_config_context_window_override_wins_over_max_context_window() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
 
@@ -277,7 +277,7 @@ async fn remote_models_config_context_window_override_clamps_to_max_context_wind
         matches!(
             event,
             EventMsg::TurnStarted(started)
-                if started.model_context_window == Some(400_000)
+                if started.model_context_window == Some(1_000_000)
         )
     })
     .await;
@@ -285,16 +285,16 @@ async fn remote_models_config_context_window_override_clamps_to_max_context_wind
         unreachable!("wait_for_event returned unexpected event");
     };
 
-    assert_eq!(turn_started.model_context_window, Some(400_000));
+    assert_eq!(turn_started.model_context_window, Some(1_000_000));
 
     Ok(())
 }
 
 /// Scenario: the user explicitly configures a context window above the model's
-/// max_context_window. This verifies the runtime window is clamped to the max
-/// instead of using the oversized config value.
+/// max_context_window. This verifies the runtime window uses the explicit
+/// config value; max_context_window is only the default when config is absent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_models_config_override_above_max_uses_max_context_window() -> Result<()> {
+async fn remote_models_config_override_above_max_uses_config_context_window() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
 
@@ -338,7 +338,7 @@ async fn remote_models_config_override_above_max_uses_max_context_window() -> Re
         matches!(
             event,
             EventMsg::TurnStarted(started)
-                if started.model_context_window == Some(400_000)
+                if started.model_context_window == Some(500_000)
         )
     })
     .await;
@@ -346,16 +346,16 @@ async fn remote_models_config_override_above_max_uses_max_context_window() -> Re
         unreachable!("wait_for_event returned unexpected event");
     };
 
-    assert_eq!(turn_started.model_context_window, Some(400_000));
+    assert_eq!(turn_started.model_context_window, Some(500_000));
 
     Ok(())
 }
 
 /// Scenario: model metadata includes both context_window and max_context_window,
-/// but the user did not configure an override. This verifies the runtime keeps
-/// using the model's default context_window in the no-override path.
+/// but the user did not configure an override. This verifies the runtime now
+/// promotes the model's advertised maximum into the active context window.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_models_use_context_window_when_config_override_is_absent() -> Result<()> {
+async fn remote_models_use_max_context_window_when_config_override_is_absent() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
 
@@ -398,7 +398,7 @@ async fn remote_models_use_context_window_when_config_override_is_absent() -> Re
         matches!(
             event,
             EventMsg::TurnStarted(started)
-                if started.model_context_window == Some(273_000)
+                if started.model_context_window == Some(400_000)
         )
     })
     .await;
@@ -406,7 +406,7 @@ async fn remote_models_use_context_window_when_config_override_is_absent() -> Re
         unreachable!("wait_for_event returned unexpected event");
     };
 
-    assert_eq!(turn_started.model_context_window, Some(273_000));
+    assert_eq!(turn_started.model_context_window, Some(400_000));
 
     Ok(())
 }

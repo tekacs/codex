@@ -410,6 +410,7 @@ fn model_info_with_context_window(slug: &str, context_window: i64) -> ModelInfo 
         .find(|model| model.slug == slug)
         .expect("model missing from models.json");
     model_info.context_window = Some(context_window);
+    model_info.max_context_window = Some(context_window);
     model_info
 }
 
@@ -1178,7 +1179,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let prefixed_second_summary = summary_with_prefix(second_summary_text);
     let prefixed_third_summary = summary_with_prefix(third_summary_text);
     // token used count after long work
-    let token_count_used = 270_000;
+    let token_count_used = 1_100_000;
     // token used count after compaction
     let token_count_used_after_compaction = 80000;
 

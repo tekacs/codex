@@ -113,11 +113,6 @@ fn estimate_compact_input_tokens(request: &responses::ResponsesRequest) -> i64 {
     })
 }
 
-fn estimate_compact_payload_tokens(request: &responses::ResponsesRequest) -> i64 {
-    estimate_compact_input_tokens(request)
-        .saturating_add(approx_token_count(&request.instructions_text()))
-}
-
 fn assert_tools_payload_does_not_defer(body: &Value) {
     if let Some(tools) = body.get("tools") {
         assert!(
@@ -3036,14 +3031,13 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     );
 
     let baseline_input_tokens = estimate_compact_input_tokens(&baseline_compact_request);
-    let baseline_payload_tokens = estimate_compact_payload_tokens(&baseline_compact_request);
 
     let override_base_instructions = format!(
         "{}\nREMOTE_BASE_INSTRUCTIONS_OVERRIDE {}",
         baseline_compact_request.instructions_text(),
-        "x".repeat(8_000)
+        "x".repeat(16_000)
     );
-    let override_context_window = baseline_payload_tokens.saturating_add(500);
+    let override_context_window = 6_000;
     let pretrim_override_estimate =
         baseline_input_tokens.saturating_add(approx_token_count(&override_base_instructions));
     assert!(
