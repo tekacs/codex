@@ -39,6 +39,7 @@ pub use remote_control::RemoteControlPolicy;
 pub use remote_control::RemoteControlStartConfig;
 pub use remote_control::RemoteControlStartupMode;
 pub use remote_control::RemoteControlUnavailable;
+pub use remote_control::remote_control_user_agent_if_ready;
 pub use remote_control::start_remote_control;
 pub use remote_control::take_remote_control_disabled_env;
 pub use stdio::start_stdio_connection;

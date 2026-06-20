@@ -1,14 +1,19 @@
 use super::auth::RemoteControlConnectionAuth;
+use super::enroll::REMOTE_CONTROL_ORIGINATOR_HEADER;
 use super::enroll::RemoteControlEnrollment;
 use super::enroll::RemoteControlServerTokenRefreshRequirement;
 use super::enroll::format_headers;
 use super::enroll::preview_remote_control_response_body;
+use super::enroll::remote_control_originator;
+use super::enroll::remote_control_user_agent;
+use super::enroll::reported_app_server_version;
 use super::protocol::EnrollRemoteServerRequest;
 use super::protocol::EnrollRemoteServerResponse;
 use super::protocol::RefreshRemoteServerRequest;
 use super::protocol::RemoteControlTarget;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
+use axum::http::header::USER_AGENT;
 use codex_login::default_client::create_client_without_request_logging;
 use rand::Rng;
 use serde::Serialize;
@@ -86,7 +91,7 @@ pub(super) async fn enroll_remote_control_server(
         name: server_name.to_string(),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
-        app_server_version: env!("CARGO_PKG_VERSION"),
+        app_server_version: reported_app_server_version().await,
         installation_id: installation_id.to_string(),
     };
     let enrollment_response = send_remote_control_server_request::<_, EnrollRemoteServerResponse>(
@@ -228,6 +233,11 @@ where
     let response = client
         .post(url)
         .timeout(timeout)
+        .header(
+            REMOTE_CONTROL_ORIGINATOR_HEADER,
+            remote_control_originator(),
+        )
+        .header(USER_AGENT, remote_control_user_agent().await)
         .headers(auth_headers)
         .header(REMOTE_CONTROL_INSTALLATION_ID_HEADER, installation_id)
         .json(request)

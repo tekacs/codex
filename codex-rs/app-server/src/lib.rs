@@ -81,6 +81,7 @@ use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const SQLITE_RECOVERY_CONFIG_WARNING_SUMMARY: &str = "Codex rebuilt its local database.";
+const SOURCE_BUILD_REMOTE_CONTROL_CLIENT_NAME: &str = "Codex Desktop";
 
 fn is_unsupported_untrusted_approval_policy_error(err: &std::io::Error) -> bool {
     err.get_ref().is_some_and(
@@ -775,6 +776,14 @@ pub async fn run_main_with_transport_options(
             transport_accept_handles.push(accept_handle);
         }
         AppServerTransport::Off => {}
+    }
+    if remote_control_explicitly_requested
+        && app_server_client_name_rx.is_none()
+        && env!("CARGO_PKG_VERSION") == "0.0.0"
+    {
+        let (client_name_tx, client_name_rx) = oneshot::channel::<String>();
+        let _ = client_name_tx.send(SOURCE_BUILD_REMOTE_CONTROL_CLIENT_NAME.to_string());
+        app_server_client_name_rx = Some(client_name_rx);
     }
     drop(unix_socket_startup_lock);
 

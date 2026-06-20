@@ -22,10 +22,13 @@ use crate::transport::remote_control::auth::load_remote_control_auth;
 use crate::transport::remote_control::auth::recover_remote_control_auth;
 use crate::transport::remote_control::client_tracker::ClientTracker;
 use crate::transport::remote_control::client_tracker::REMOTE_CONTROL_IDLE_SWEEP_INTERVAL;
+use crate::transport::remote_control::enroll::REMOTE_CONTROL_ORIGINATOR_HEADER;
 use crate::transport::remote_control::enroll::RemoteControlEnrollment;
 use crate::transport::remote_control::enroll::format_headers;
 use crate::transport::remote_control::enroll::load_persisted_remote_control_enrollment;
 use crate::transport::remote_control::enroll::preview_remote_control_response_body;
+use crate::transport::remote_control::enroll::remote_control_originator;
+use crate::transport::remote_control::enroll::remote_control_user_agent;
 use crate::transport::remote_control::enroll::update_persisted_remote_control_enrollment;
 use crate::transport::remote_control::host_device::REMOTE_CONTROL_HOST_DEVICE_KIND_HEADER;
 use crate::transport::remote_control::host_device::host_device_kind;
@@ -1257,6 +1260,7 @@ async fn build_remote_control_websocket_request(
     enrollment: &RemoteControlEnrollment,
     installation_id: &str,
     subscribe_cursor: Option<&str>,
+    user_agent: &str,
 ) -> io::Result<tungstenite::http::Request<()>> {
     let mut request = websocket_url.into_client_request().map_err(|err| {
         io::Error::new(
@@ -1299,6 +1303,12 @@ async fn build_remote_control_websocket_request(
             host_device_kind,
         )?;
     }
+    set_remote_control_header(
+        headers,
+        REMOTE_CONTROL_ORIGINATOR_HEADER,
+        &remote_control_originator(),
+    )?;
+    set_remote_control_header(headers, "user-agent", user_agent)?;
     if let Some(subscribe_cursor) = subscribe_cursor {
         set_remote_control_header(
             headers,
@@ -1349,11 +1359,13 @@ pub(super) async fn connect_remote_control_websocket(
         })?;
         (auth, enrollment)
     };
+    let user_agent = remote_control_user_agent().await;
     let request = build_remote_control_websocket_request(
         &remote_control_target.websocket_url,
         &enrollment,
         connect_options.installation_id,
         connect_options.subscribe_cursor,
+        &user_agent,
     )
     .await?;
 

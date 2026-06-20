@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 
 use axum::http::HeaderValue;
 use codex_analytics::AppServerRpcTransport;
+use codex_app_server_transport::remote_control_user_agent_if_ready;
 use codex_login::default_client::SetOriginatorError;
 use codex_login::default_client::USER_AGENT_SUFFIX;
 use codex_login::default_client::get_codex_user_agent;
@@ -138,7 +139,11 @@ impl InitializeRequestProcessor {
             *suffix = Some(user_agent_suffix);
         }
 
-        let user_agent = get_codex_user_agent();
+        let user_agent = if name == "codex-backend" {
+            remote_control_user_agent_if_ready().unwrap_or_else(get_codex_user_agent)
+        } else {
+            get_codex_user_agent()
+        };
         let response = InitializeResponse {
             user_agent,
             codex_home,

@@ -14,6 +14,7 @@ use self::auth::recover_remote_control_auth;
 use self::desired_state::RemoteControlDesiredState;
 use self::desired_state::acquire_persistence_lock;
 use self::enroll::RemoteControlEnrollment;
+use self::enroll::cached_remote_control_user_agent;
 use self::enroll::load_persisted_remote_control_enrollment;
 use self::enroll::update_persisted_remote_control_enrollment;
 use self::server_api::enroll_remote_control_server;
@@ -86,6 +87,10 @@ pub enum RemoteControlStartupMode {
 /// Internal marker used by the daemon to disable remote control without requiring a new CLI flag.
 pub const REMOTE_CONTROL_DISABLED_ENV_VAR: &str =
     "CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED";
+
+pub fn remote_control_user_agent_if_ready() -> Option<String> {
+    cached_remote_control_user_agent()
+}
 
 /// Reads and removes the daemon's internal disabled-start marker before worker threads start.
 pub fn take_remote_control_disabled_env() -> bool {

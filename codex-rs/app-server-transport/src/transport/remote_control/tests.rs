@@ -1,5 +1,6 @@
 use super::auth::REMOTE_CONTROL_ACCOUNT_ID_HEADER;
 use super::enroll::RemoteControlEnrollment;
+use super::enroll::expected_reported_app_server_version_for_tests;
 use super::enroll::load_persisted_remote_control_enrollment;
 use super::enroll::update_persisted_remote_control_enrollment;
 use super::protocol::ClientEnvelope;
@@ -1701,10 +1702,24 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
         vec!["account_id"]
     );
     assert_eq!(
+        enroll_request.headers.get("originator"),
+        Some(&"Codex Desktop".to_string())
+    );
+    assert_eq!(
         enroll_request
             .headers
             .get_all(REMOTE_CONTROL_INSTALLATION_ID_HEADER),
         vec![TEST_INSTALLATION_ID]
+    );
+    assert!(
+        enroll_request
+            .headers
+            .get("user-agent")
+            .is_some_and(|value| value.contains(&format!(
+                "/{} ",
+                expected_reported_app_server_version_for_tests()
+            ))),
+        "expected enroll request user-agent to carry reported app-server version"
     );
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&enroll_request.body)
@@ -1713,7 +1728,7 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
             "name": expected_server_name,
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
-            "app_server_version": env!("CARGO_PKG_VERSION"),
+            "app_server_version": expected_reported_app_server_version_for_tests(),
             "installation_id": TEST_INSTALLATION_ID,
         })
     );
@@ -1766,6 +1781,20 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
     assert_eq!(
         handshake_request.headers.get("x-codex-protocol-version"),
         Some(&REMOTE_CONTROL_PROTOCOL_VERSION.to_string())
+    );
+    assert_eq!(
+        handshake_request.headers.get("originator"),
+        Some(&"Codex Desktop".to_string())
+    );
+    assert!(
+        handshake_request
+            .headers
+            .get("user-agent")
+            .is_some_and(|value| value.contains(&format!(
+                "/{} ",
+                expected_reported_app_server_version_for_tests()
+            ))),
+        "expected websocket user-agent to carry reported app-server version"
     );
 
     let backend_client_id = ClientId("backend-test-client".to_string());

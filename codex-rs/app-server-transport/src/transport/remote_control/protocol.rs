@@ -21,7 +21,7 @@ pub(super) struct EnrollRemoteServerRequest {
     pub(super) name: String,
     pub(super) os: &'static str,
     pub(super) arch: &'static str,
-    pub(super) app_server_version: &'static str,
+    pub(super) app_server_version: String,
     pub(super) installation_id: String,
 }
 

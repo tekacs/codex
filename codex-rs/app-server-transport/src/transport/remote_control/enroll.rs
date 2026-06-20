@@ -5,11 +5,16 @@ use super::protocol::RemoteControlTarget;
 use super::protocol::StartRemoteControlPairingRequest;
 use super::protocol::StartRemoteControlPairingResponse;
 use axum::http::HeaderMap;
+use axum::http::header::USER_AGENT;
 use codex_app_server_protocol::RemoteControlPairingStartResponse;
 use codex_app_server_protocol::RemoteControlPairingStatusResponse;
 use codex_login::default_client::create_client_without_request_logging;
+use codex_login::default_client::get_codex_user_agent;
+use codex_login::default_client::originator;
 use codex_state::RemoteControlEnrollmentRecord;
 use codex_state::StateRuntime;
+#[cfg(not(test))]
+use serde::Deserialize;
 use std::io;
 use std::io::ErrorKind;
 use time::OffsetDateTime;
@@ -20,10 +25,29 @@ use tracing::warn;
 const REMOTE_CONTROL_PAIRING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const REMOTE_CONTROL_RESPONSE_BODY_MAX_BYTES: usize = 4096;
 const REMOTE_CONTROL_SERVER_TOKEN_REFRESH_SKEW_SECS: i64 = 5 * 60;
+const REMOTE_CONTROL_DESKTOP_ORIGINATOR: &str = "Codex Desktop";
+#[cfg(not(test))]
+const DESKTOP_APP_INFO_PLIST: &str = "/Applications/Codex.app/Contents/Info.plist";
+#[cfg(not(test))]
+const PLUTIL_BIN: &str = "/usr/bin/plutil";
+#[cfg(not(test))]
+const REMOTE_CONTROL_LATEST_RELEASE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(5);
+const DEV_BUILD_VERSION_SENTINEL: &str = "0.0.0";
+#[cfg(not(test))]
+const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+
+#[cfg(test)]
+const TEST_DESKTOP_APP_SERVER_VERSION: &str = "26.616.41845";
+#[cfg(test)]
+const TEST_LATEST_STABLE_RELEASE_TAG: &str = "rust-v0.141.0";
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const OAI_REQUEST_ID_HEADER: &str = "x-oai-request-id";
 const CF_RAY_HEADER: &str = "cf-ray";
+pub(super) const REMOTE_CONTROL_ORIGINATOR_HEADER: &str = "originator";
+static SOURCE_BUILD_REPORTED_APP_SERVER_VERSION: std::sync::OnceLock<String> =
+    std::sync::OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RemoteControlEnrollment {
@@ -62,6 +86,11 @@ impl RemoteControlEnrollment {
         let response = create_client_without_request_logging()
             .post(&self.remote_control_target.pair_url)
             .timeout(REMOTE_CONTROL_PAIRING_TIMEOUT)
+            .header(
+                REMOTE_CONTROL_ORIGINATOR_HEADER,
+                remote_control_originator(),
+            )
+            .header(USER_AGENT, remote_control_user_agent().await)
             .bearer_auth(remote_control_token)
             .json(&request)
             .send()
@@ -157,6 +186,11 @@ impl RemoteControlEnrollment {
         let response = create_client_without_request_logging()
             .post(&self.remote_control_target.pair_status_url)
             .timeout(REMOTE_CONTROL_PAIRING_TIMEOUT)
+            .header(
+                REMOTE_CONTROL_ORIGINATOR_HEADER,
+                remote_control_originator(),
+            )
+            .header(USER_AGENT, remote_control_user_agent().await)
             .bearer_auth(remote_control_token)
             .json(&request)
             .send()
@@ -425,6 +459,183 @@ pub(crate) fn format_headers(headers: &HeaderMap) -> String {
     format!("request-id: {request_id_str}, cf-ray: {cf_ray_str}")
 }
 
+pub(super) async fn reported_app_server_version() -> String {
+    let build_version = env!("CARGO_PKG_VERSION");
+    if build_version != DEV_BUILD_VERSION_SENTINEL {
+        return build_version.to_string();
+    }
+
+    if let Some(version) = SOURCE_BUILD_REPORTED_APP_SERVER_VERSION.get() {
+        return version.clone();
+    }
+
+    let version = match installed_desktop_app_server_version().await {
+        Ok(version) => version,
+        Err(desktop_err) => {
+            warn!(
+                "failed to resolve installed Desktop app-server version for remote-control enrollment: {desktop_err}"
+            );
+            match latest_stable_release_version().await {
+                Ok(version) => version,
+                Err(release_err) => {
+                    warn!(
+                        "failed to resolve latest stable release version for remote-control enrollment: {release_err}"
+                    );
+                    build_version.to_string()
+                }
+            }
+        }
+    };
+    let _ = SOURCE_BUILD_REPORTED_APP_SERVER_VERSION.set(version.clone());
+    version
+}
+
+pub(super) async fn remote_control_user_agent() -> String {
+    let version = reported_app_server_version().await;
+    remote_control_user_agent_with_version(&version)
+}
+
+pub(super) fn cached_remote_control_user_agent() -> Option<String> {
+    if env!("CARGO_PKG_VERSION") == DEV_BUILD_VERSION_SENTINEL {
+        return SOURCE_BUILD_REPORTED_APP_SERVER_VERSION
+            .get()
+            .map(|version| remote_control_user_agent_with_version(version));
+    }
+
+    Some(remote_control_user_agent_with_version(env!(
+        "CARGO_PKG_VERSION"
+    )))
+}
+
+pub(super) fn remote_control_originator() -> String {
+    if env!("CARGO_PKG_VERSION") == DEV_BUILD_VERSION_SENTINEL {
+        REMOTE_CONTROL_DESKTOP_ORIGINATOR.to_string()
+    } else {
+        originator().value
+    }
+}
+
+fn remote_control_user_agent_with_version(version: &str) -> String {
+    let build_version = env!("CARGO_PKG_VERSION");
+    let mut current = get_codex_user_agent();
+    if build_version == DEV_BUILD_VERSION_SENTINEL
+        && let Some((_, rest)) = current.split_once('/')
+    {
+        current = format!("{REMOTE_CONTROL_DESKTOP_ORIGINATOR}/{rest}");
+    }
+    if build_version != version {
+        let build_marker = format!("/{build_version} ");
+        let replacement = format!("/{version} ");
+        current = current.replacen(&build_marker, &replacement, 1);
+    }
+    current
+}
+
+#[cfg(not(test))]
+async fn installed_desktop_app_server_version() -> io::Result<String> {
+    let output = std::process::Command::new(PLUTIL_BIN)
+        .args([
+            "-extract",
+            "CFBundleShortVersionString",
+            "raw",
+            "-o",
+            "-",
+            DESKTOP_APP_INFO_PLIST,
+        ])
+        .output()
+        .map_err(|err| {
+            io::Error::other(format!(
+                "failed to read installed Desktop Codex bundle version from `{DESKTOP_APP_INFO_PLIST}`: {err}"
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "reading installed Desktop Codex bundle version from `{DESKTOP_APP_INFO_PLIST}` exited with {}",
+            output.status
+        )));
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| {
+        io::Error::other(format!(
+            "installed Desktop Codex bundle version from `{DESKTOP_APP_INFO_PLIST}` returned non-UTF8 output: {err}"
+        ))
+    })?;
+    extract_desktop_app_bundle_version(&stdout)
+}
+
+#[cfg(test)]
+async fn installed_desktop_app_server_version() -> io::Result<String> {
+    Ok(TEST_DESKTOP_APP_SERVER_VERSION.to_string())
+}
+
+fn extract_desktop_app_bundle_version(output: &str) -> io::Result<String> {
+    let version = output.trim();
+    if version.is_empty() {
+        return Err(io::Error::other(
+            "installed Desktop Codex bundle version output was empty",
+        ));
+    }
+    Ok(version.to_string())
+}
+
+#[cfg(not(test))]
+async fn latest_stable_release_version() -> io::Result<String> {
+    #[derive(Deserialize)]
+    struct ReleaseInfo {
+        tag_name: String,
+    }
+
+    let response = create_client_without_request_logging()
+        .get(GITHUB_LATEST_RELEASE_URL)
+        .header(USER_AGENT, get_codex_user_agent())
+        .timeout(REMOTE_CONTROL_LATEST_RELEASE_TIMEOUT)
+        .send()
+        .await
+        .map_err(|err| {
+            io::Error::other(format!(
+                "failed to fetch latest Codex release metadata: {err}"
+            ))
+        })?;
+    let status = response.status();
+    let body = response.bytes().await.map_err(|err| {
+        io::Error::other(format!(
+            "failed to read latest Codex release metadata: {err}"
+        ))
+    })?;
+    if !status.is_success() {
+        return Err(io::Error::other(format!(
+            "latest Codex release metadata probe failed: HTTP {status}"
+        )));
+    }
+    let release = serde_json::from_slice::<ReleaseInfo>(&body).map_err(|err| {
+        io::Error::other(format!(
+            "failed to parse latest Codex release metadata: {err}"
+        ))
+    })?;
+    extract_release_version(&release.tag_name)
+}
+
+#[cfg(test)]
+async fn latest_stable_release_version() -> io::Result<String> {
+    extract_release_version(TEST_LATEST_STABLE_RELEASE_TAG)
+}
+
+fn extract_release_version(tag_name: &str) -> io::Result<String> {
+    tag_name
+        .strip_prefix("rust-v")
+        .map(str::to_owned)
+        .ok_or_else(|| io::Error::other(format!("failed to parse latest release tag `{tag_name}`")))
+}
+
+#[cfg(test)]
+pub(super) fn expected_reported_app_server_version_for_tests() -> String {
+    if env!("CARGO_PKG_VERSION") == DEV_BUILD_VERSION_SENTINEL {
+        TEST_DESKTOP_APP_SERVER_VERSION.to_string()
+    } else {
+        env!("CARGO_PKG_VERSION").to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +679,53 @@ mod tests {
                 "manual_pairing_code": "<redacted>",
             })
         );
+    }
+
+    #[test]
+    fn extract_release_version_accepts_rust_prefix() {
+        assert_eq!(
+            extract_release_version("rust-v0.141.0").expect("release tag should parse"),
+            "0.141.0"
+        );
+    }
+
+    #[test]
+    fn extract_desktop_app_bundle_version_accepts_plutil_output() {
+        assert_eq!(
+            extract_desktop_app_bundle_version("26.616.41845\n")
+                .expect("bundle version output should parse"),
+            "26.616.41845"
+        );
+    }
+
+    #[tokio::test]
+    async fn reported_app_server_version_prefers_desktop_app_version_for_source_builds() {
+        let version = reported_app_server_version().await;
+
+        if env!("CARGO_PKG_VERSION") == DEV_BUILD_VERSION_SENTINEL {
+            assert_eq!(version, TEST_DESKTOP_APP_SERVER_VERSION);
+        } else {
+            assert_eq!(version, env!("CARGO_PKG_VERSION"));
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_control_user_agent_uses_reported_version_for_source_builds() {
+        let user_agent = remote_control_user_agent().await;
+        let expected_version = expected_reported_app_server_version_for_tests();
+
+        assert!(user_agent.contains(&format!("/{expected_version} ")));
+        if env!("CARGO_PKG_VERSION") == DEV_BUILD_VERSION_SENTINEL {
+            assert!(user_agent.starts_with("Codex Desktop/"));
+            assert_eq!(remote_control_originator(), "Codex Desktop");
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_remote_control_user_agent_matches_resolved_version() {
+        let user_agent = remote_control_user_agent().await;
+
+        assert_eq!(cached_remote_control_user_agent(), Some(user_agent));
     }
 
     #[tokio::test]
