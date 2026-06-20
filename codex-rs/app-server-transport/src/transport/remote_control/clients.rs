@@ -3,8 +3,10 @@ use super::auth::RemoteControlConnectionAuth;
 use super::auth::load_remote_control_auth;
 use super::auth::recover_remote_control_auth;
 use super::auth::request_client;
+use super::enroll::REMOTE_CONTROL_ORIGINATOR_HEADER;
 use super::enroll::format_headers;
 use super::enroll::preview_remote_control_response_body;
+use super::enroll::remote_control_originator;
 use super::protocol::normalize_remote_control_base_url;
 use axum::http::HeaderMap;
 use codex_app_server_protocol::RemoteControlClient;
@@ -220,6 +222,10 @@ async fn send_client_management_request_once(
     let response = request
         .timeout(REMOTE_CONTROL_CLIENT_MANAGEMENT_TIMEOUT)
         .headers(auth_headers)
+        .header(
+            REMOTE_CONTROL_ORIGINATOR_HEADER,
+            remote_control_originator(),
+        )
         .send()
         .await
         .map_err(|error| match error {
