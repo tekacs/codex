@@ -119,6 +119,93 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     })
 }
 
+pub(crate) fn create_monitor_command_tool_with_environment_id(
+    options: CommandToolOptions,
+    include_environment_id: bool,
+    include_shell_parameter: bool,
+    include_windows_shell_guidance: bool,
+) -> ToolSpec {
+    let mut properties = BTreeMap::from([
+        (
+            "cmd".to_string(),
+            JsonSchema::string(Some("Shell command to execute as a monitor stream.".to_string())),
+        ),
+        (
+            "workdir".to_string(),
+            JsonSchema::string(Some(
+                "Working directory for the command. Defaults to the turn cwd.".to_string(),
+            )),
+        ),
+        (
+            "tty".to_string(),
+            JsonSchema::boolean(Some(
+                "True allocates a PTY for the command; false or omitted uses plain pipes."
+                    .to_string(),
+            )),
+        ),
+        (
+            "max_output_tokens".to_string(),
+            JsonSchema::number(Some(
+                "Output token budget for the initial startup response. Defaults to 10000 tokens; larger requests may be capped by policy.".to_string(),
+            )),
+        ),
+    ]);
+    if include_shell_parameter {
+        properties.insert(
+            "shell".to_string(),
+            JsonSchema::string(Some(
+                "Shell binary to launch. Defaults to the user's default shell.".to_string(),
+            )),
+        );
+    }
+    if options.allow_login_shell {
+        properties.insert(
+            "login".to_string(),
+            JsonSchema::boolean(Some(
+                "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+                    .to_string(),
+            )),
+        );
+    }
+    if include_environment_id {
+        properties.insert(
+            "environment_id".to_string(),
+            JsonSchema::string(Some(
+                "Environment id from <environment_context>. Omit to use the primary environment."
+                    .to_string(),
+            )),
+        );
+    }
+    properties.extend(create_approval_parameters(
+        options.exec_permission_approvals_enabled,
+    ));
+
+    let description = concat!(
+        "Runs a command as a monitor stream, returning startup output or a session ID for the running monitor. ",
+        "Use this only for long-lived streams where intermediate output itself should wake the model while the process remains alive. ",
+        "Do not use it for one-shot tests, builds, reviews, or checks where only process completion matters. ",
+        "The command is treated as ongoing monitor work after the startup window; monitor exit means the stream ended, not that a watched condition succeeded. ",
+        "Use exec_command for one-shot commands where only process completion should wake the model."
+    );
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "monitor_command".to_string(),
+        description: if include_windows_shell_guidance {
+            format!("{description}\n\n{}", windows_shell_guidance())
+        } else {
+            description.to_string()
+        },
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["cmd".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(unified_exec_output_schema()),
+    })
+}
+
 pub fn create_write_stdin_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (

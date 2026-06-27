@@ -995,7 +995,7 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
                 && turn_context.config.features.enabled(Feature::UnifiedExec)
                 && !matches!(context.model_info.shell_type, ConfigShellToolType::Disabled)
             {
-                registry.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
+                let options = ExecCommandHandlerOptions {
                     allow_login_shell: any_environment_allows_login_shell(context.environments),
                     allow_tty: turn_context
                         .config
@@ -1010,7 +1010,9 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
                     include_windows_shell_guidance: should_include_windows_shell_guidance(
                         context.environments,
                     ),
-                }));
+                };
+                registry.add(ExecCommandHandler::new(options));
+                registry.add(ExecCommandHandler::monitor(options));
                 registry.add(WriteStdinHandler);
             }
             if turn_context.config.features.enabled(Feature::ViewImage) {
@@ -1103,6 +1105,7 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));
+        registry.add(ExecCommandHandler::monitor(options));
         registry.add(WriteStdinHandler);
     } else {
         // Managed requirements are the only configuration path that can keep

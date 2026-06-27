@@ -1549,17 +1549,11 @@ fn bundled_model_prompts_allow_background_exec_turns_to_yield() {
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
     let stale_guidance = "Do not end your turn while `exec_command`";
     let expected_guidance = "If `exec_command` yields a live background process";
+    let expected_monitor_guidance = "Use `monitor_command` only for long-lived streams";
     let mut gpt_5_5_has_expected_guidance = false;
+    let mut gpt_5_5_has_expected_monitor_guidance = false;
 
     for model in &response.models {
-        assert!(
-            !model.base_instructions.contains(stale_guidance),
-            "{} base instructions should not tell agents to keep waiting on background exec sessions",
-            model.slug
-        );
-        gpt_5_5_has_expected_guidance |= model.slug == "gpt-5.5"
-            && model.base_instructions.contains(expected_guidance);
-
         if let Some(model_messages) = &model.model_messages
             && let Some(instructions_template) = &model_messages.instructions_template
         {
@@ -1568,13 +1562,19 @@ fn bundled_model_prompts_allow_background_exec_turns_to_yield() {
                 "{} instructions template should not tell agents to keep waiting on background exec sessions",
                 model.slug
             );
-            gpt_5_5_has_expected_guidance |= model.slug == "gpt-5.5"
-                && instructions_template.contains(expected_guidance);
+            gpt_5_5_has_expected_guidance |=
+                model.slug == "gpt-5.5" && instructions_template.contains(expected_guidance);
+            gpt_5_5_has_expected_monitor_guidance |= model.slug == "gpt-5.5"
+                && instructions_template.contains(expected_monitor_guidance);
         }
     }
 
     assert!(
         gpt_5_5_has_expected_guidance,
         "gpt-5.5 should preserve fire-and-yield background exec guidance"
+    );
+    assert!(
+        gpt_5_5_has_expected_monitor_guidance,
+        "gpt-5.5 should preserve narrow monitor_command guidance"
     );
 }

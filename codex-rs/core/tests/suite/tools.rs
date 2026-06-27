@@ -904,7 +904,7 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
         CommandToolAvailability::ModelDisabled,
     ] {
         let tools = collect_tools(availability).await?;
-        for command_tool in ["exec_command", "write_stdin"] {
+        for command_tool in ["exec_command", "monitor_command", "write_stdin"] {
             assert!(
                 !tools.iter().any(|name| name == command_tool),
                 "tools list should not include {command_tool} for {availability:?}: {tools:?}"
@@ -914,7 +914,7 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
 
     for availability in [CommandToolAvailability::Default] {
         let tools = collect_tools(availability).await?;
-        for command_tool in ["exec_command", "write_stdin"] {
+        for command_tool in ["exec_command", "monitor_command", "write_stdin"] {
             assert!(
                 tools.iter().any(|name| name == command_tool),
                 "tools list should include {command_tool} for {availability:?}: {tools:?}"
@@ -928,7 +928,9 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
         "managed unified-exec disable should keep one-shot command execution: {tools:?}"
     );
     assert!(
-        !tools.iter().any(|name| name == "write_stdin"),
+        !tools
+            .iter()
+            .any(|name| name == "write_stdin" || name == "monitor_command"),
         "managed unified-exec disable must not expose retained process authority: {tools:?}"
     );
 

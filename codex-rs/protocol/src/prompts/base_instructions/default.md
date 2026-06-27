@@ -263,6 +263,9 @@ When using the shell, you must adhere to the following guidelines:
 
 - When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)
 - Do not use python scripts to attempt to output larger chunks of a file.
+- Use `exec_command` for one-shot commands where process completion should wake you. If the command is still running after yielding and you intend to pick up when it exits, treat it as background work and end your turn if there is no other independent work to do; the runtime will send a completion notification.
+- Use `monitor_command` instead of `exec_command` only for long-lived streams where intermediate output itself should wake you while the process continues running. Do not use it for one-shot tests, builds, reviews, or checks where only completion matters. Monitor exit means the stream ended, not that a watched condition succeeded.
+- Do not use `write_stdin`, `ps`, `pgrep`, or similar liveness checks just to see whether a background command has finished.
 
 ## `update_plan`
 

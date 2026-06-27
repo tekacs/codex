@@ -60,7 +60,12 @@ async fn streaming_output_harness() -> anyhow::Result<StreamingOutputHarness> {
         "streaming-output-test".to_string(),
     );
     let transcript = Arc::new(tokio::sync::Mutex::new(HeadTailBuffer::default()));
-    start_streaming_output(&process, &context, Arc::clone(&transcript));
+    start_streaming_output(
+        &process,
+        &context,
+        Arc::clone(&transcript),
+        /*monitor*/ None,
+    );
 
     Ok(StreamingOutputHarness {
         process,
@@ -241,6 +246,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         Some(network_denial_monitor),
         /*plugin_metrics_sidecar*/ None,
         Arc::new(AtomicBool::new(false)),
+        /*monitor*/ false,
     );
 
     let exited_at = Instant::now();
@@ -314,6 +320,7 @@ async fn streaming_output_bounds_invalid_bytes_and_keeps_the_full_transcript() {
             turn,
             call_id: "bounded-output-test".to_string(),
         },
+        monitor: None,
     };
 
     // The first frame splits 😀; the last allowed frame leaves é incomplete.

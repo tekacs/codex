@@ -27,6 +27,7 @@ use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::unified_exec::ExecCommandRequest;
+use crate::unified_exec::MIN_YIELD_TIME_MS;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -47,6 +48,7 @@ use codex_utils_string::truncate_middle_chars;
 
 use super::super::shell_spec::CommandToolOptions;
 use super::super::shell_spec::create_exec_command_tool_with_environment_id;
+use super::super::shell_spec::create_monitor_command_tool_with_environment_id;
 use super::ExecCommandArgs;
 use super::ExecCommandEnvironmentArgs;
 use super::get_command;
@@ -72,15 +74,32 @@ enum ExecCommandLifetime {
     OneShot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommandKind {
+    Exec,
+    Monitor,
+}
+
+impl CommandKind {
+    fn tool_name(self) -> &'static str {
+        match self {
+            Self::Exec => "exec_command",
+            Self::Monitor => "monitor_command",
+        }
+    }
+}
+
 pub struct ExecCommandHandler {
     options: ExecCommandHandlerOptions,
     lifetime: ExecCommandLifetime,
+    kind: CommandKind,
 }
 
 impl Default for ExecCommandHandler {
     fn default() -> Self {
         Self {
             lifetime: ExecCommandLifetime::Interactive,
+            kind: CommandKind::Exec,
             options: ExecCommandHandlerOptions {
                 allow_login_shell: false,
                 allow_tty: true,
@@ -98,6 +117,15 @@ impl ExecCommandHandler {
         Self {
             options,
             lifetime: ExecCommandLifetime::Interactive,
+            kind: CommandKind::Exec,
+        }
+    }
+
+    pub(crate) fn monitor(options: ExecCommandHandlerOptions) -> Self {
+        Self {
+            options,
+            lifetime: ExecCommandLifetime::Interactive,
+            kind: CommandKind::Monitor,
         }
     }
 
@@ -105,25 +133,35 @@ impl ExecCommandHandler {
         Self {
             options,
             lifetime: ExecCommandLifetime::OneShot,
+            kind: CommandKind::Exec,
         }
     }
 }
 
 impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     fn tool_name(&self) -> ToolName {
-        ToolName::plain("exec_command")
+        ToolName::plain(self.kind.tool_name())
     }
 
     fn spec(&self) -> ToolSpec {
-        let spec = create_exec_command_tool_with_environment_id(
-            CommandToolOptions {
-                allow_login_shell: self.options.allow_login_shell,
-                exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
-            },
-            self.options.include_environment_id,
-            self.options.include_shell_parameter,
-            self.options.include_windows_shell_guidance,
-        );
+        let options = CommandToolOptions {
+            allow_login_shell: self.options.allow_login_shell,
+            exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
+        };
+        let spec = match self.kind {
+            CommandKind::Exec => create_exec_command_tool_with_environment_id(
+                options,
+                self.options.include_environment_id,
+                self.options.include_shell_parameter,
+                self.options.include_windows_shell_guidance,
+            ),
+            CommandKind::Monitor => create_monitor_command_tool_with_environment_id(
+                options,
+                self.options.include_environment_id,
+                self.options.include_shell_parameter,
+                self.options.include_windows_shell_guidance,
+            ),
+        };
         let mut spec = match self.lifetime {
             ExecCommandLifetime::Interactive => spec,
             ExecCommandLifetime::OneShot => one_shot_exec_command_spec(spec),
@@ -170,9 +208,10 @@ impl ExecCommandHandler {
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
             _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "exec_command handler received unsupported payload".to_string(),
-                ));
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "{} handler received unsupported payload",
+                    self.kind.tool_name()
+                )));
             }
         };
 
@@ -298,7 +337,7 @@ impl ExecCommandHandler {
         let shell_type = resolved_command.shell_type;
         let ExecCommandArgs {
             mut tty,
-            yield_time_ms,
+            mut yield_time_ms,
             timeout_ms,
             max_output_tokens,
             sandbox_permissions: _,
@@ -307,6 +346,9 @@ impl ExecCommandHandler {
             prefix_rule,
             ..
         } = args;
+        if self.kind == CommandKind::Monitor {
+            yield_time_ms = MIN_YIELD_TIME_MS;
+        }
         let completion_timeout = match self.lifetime {
             ExecCommandLifetime::Interactive => None,
             ExecCommandLifetime::OneShot => {
@@ -392,7 +434,7 @@ impl ExecCommandHandler {
             context.cancellation_token.clone(),
             Some(&tracker),
             &context.call_id,
-            "exec_command",
+            self.kind.tool_name(),
         )
         .await;
         // Keep the reservation when interception returns `Ok(None)`: the normal command below
@@ -437,6 +479,7 @@ impl ExecCommandHandler {
                 .permissions_preapproved,
             justification,
             prefix_rule,
+            wake_on_output: self.kind == CommandKind::Monitor,
         };
         let result = match completion_timeout {
             Some(timeout) => {
@@ -473,7 +516,7 @@ impl ExecCommandHandler {
                 }))
             }
             Err(err) => {
-                let message = format!("exec_command failed: {err:?}");
+                let message = format!("{} failed: {err:?}", self.kind.tool_name());
                 Err(FunctionCallError::RespondToModel(truncate_middle_chars(
                     &message,
                     EXEC_COMMAND_REJECTION_MAX_BYTES,
@@ -536,14 +579,15 @@ impl CoreToolRuntime for ExecCommandHandler {
         updated_input: serde_json::Value,
     ) -> Result<ToolInvocation, FunctionCallError> {
         let ToolPayload::Function { arguments } = invocation.payload else {
-            return Err(FunctionCallError::RespondToModel(
-                "hook input rewrite received unsupported exec_command payload".to_string(),
-            ));
+            return Err(FunctionCallError::RespondToModel(format!(
+                "hook input rewrite received unsupported {} payload",
+                self.kind.tool_name()
+            )));
         };
         invocation.payload = ToolPayload::Function {
             arguments: rewrite_function_string_argument(
                 &arguments,
-                "exec_command",
+                self.kind.tool_name(),
                 "cmd",
                 updated_hook_command(&updated_input)?,
             )?,
