@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -16,6 +17,8 @@ use super::process::UnifiedExecProcess;
 use super::take_plugin_metrics_sidecar;
 use crate::context::ContextualUserFragment;
 use crate::context::ExecCompletion;
+use crate::context::ExecKind;
+use crate::context::MonitorOutput;
 use crate::exec::MAX_EXEC_OUTPUT_DELTAS_PER_CALL;
 use crate::plugins::metrics::finish_and_track_measurements;
 use crate::session::session::Session;
@@ -43,6 +46,8 @@ pub(crate) const TRAILING_OUTPUT_GRACE: Duration = Duration::from_millis(100);
 /// downstream event consumers (especially app-server JSON-RPC) don't have to
 /// process arbitrarily large delta payloads.
 const UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES: usize = 8192;
+const MONITOR_WAKE_DELAY: Duration = Duration::from_millis(250);
+const MONITOR_WAKE_BYTES: usize = 16 * 1024;
 
 struct Emitter {
     remaining_deltas: usize,
@@ -54,10 +59,120 @@ struct Emitter {
 struct Buffer<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES> {
     pending: Vec<u8>,
     emitter: Emitter,
+    monitor: Option<MonitorWake>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MonitorWake {
+    initial_active: Arc<AtomicBool>,
+    process_id: i32,
+    command: Vec<String>,
+    call_id: String,
+    session: Weak<Session>,
+    pending: Arc<Mutex<MonitorState>>,
+}
+
+#[derive(Default)]
+struct MonitorState {
+    output: String,
+    scheduled: bool,
+}
+
+impl MonitorWake {
+    pub(crate) fn new(
+        initial_active: Arc<AtomicBool>,
+        process_id: i32,
+        command: Vec<String>,
+        call_id: String,
+        session: Weak<Session>,
+    ) -> Self {
+        Self {
+            initial_active,
+            process_id,
+            command,
+            call_id,
+            session,
+            pending: Arc::new(Mutex::new(MonitorState::default())),
+        }
+    }
+
+    async fn push(&self, output: &str) {
+        if self.initial_active.load(Ordering::Acquire) {
+            return;
+        }
+        let should_spawn = {
+            let mut pending = self.pending.lock().await;
+            append_monitor_output(&mut pending.output, output);
+            if pending.scheduled {
+                false
+            } else {
+                pending.scheduled = true;
+                true
+            }
+        };
+        if should_spawn {
+            let monitor = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(MONITOR_WAKE_DELAY).await;
+                monitor.flush_loop().await;
+            });
+        }
+    }
+
+    async fn flush_loop(&self) {
+        loop {
+            let output = {
+                let mut pending = self.pending.lock().await;
+                if pending.output.is_empty() {
+                    pending.scheduled = false;
+                    return;
+                }
+                std::mem::take(&mut pending.output)
+            };
+            self.inject(output).await;
+            tokio::time::sleep(MONITOR_WAKE_DELAY).await;
+        }
+    }
+
+    async fn flush(&self) {
+        let output = std::mem::take(&mut self.pending.lock().await.output);
+        if !output.is_empty() {
+            self.inject(output).await;
+        }
+    }
+
+    async fn inject(&self, output: String) {
+        let Some(session) = self.session.upgrade() else {
+            return;
+        };
+        let item = ContextualUserFragment::into(MonitorOutput::new(
+            &self.call_id,
+            self.process_id,
+            &self.command,
+            &output,
+        ));
+        session.inject_or_start(vec![item]).await;
+    }
+}
+
+fn append_monitor_output(pending: &mut String, output: &str) {
+    pending.push_str(output);
+    if pending.len() <= MONITOR_WAKE_BYTES {
+        return;
+    }
+    let mut split = pending.len() - MONITOR_WAKE_BYTES;
+    while !pending.is_char_boundary(split) {
+        split += 1;
+    }
+    pending.drain(..split);
 }
 
 /// Spawn a background task that emits ExecCommandOutputDelta events on UTF‑8 boundaries.
-pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &UnifiedExecContext) {
+pub(crate) fn start_streaming_output(
+    process: &UnifiedExecProcess,
+    context: &UnifiedExecContext,
+    monitor: Option<MonitorWake>,
+) {
     let mut receiver = process.output_receiver();
     let output_drained = process.output_drained_notify();
     let exit_token = process.cancellation_token();
@@ -80,6 +195,7 @@ pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &Uni
         let mut output: Buffer = Buffer {
             pending: Vec::new(),
             emitter,
+            monitor,
         };
 
         let mut grace_sleep: Option<Pin<Box<Sleep>>> = None;
@@ -170,6 +286,7 @@ pub(crate) fn spawn_exit_watcher(
     network_denial_monitor: Option<tokio::task::JoinHandle<()>>,
     plugin_metrics_sidecar: Option<SharedPluginMetricsSidecar>,
     wake_on_exit: Arc<AtomicBool>,
+    monitor: bool,
 ) {
     let session_ref = Arc::clone(&context.session);
     let turn_ref = Arc::clone(&context.step_context.turn);
@@ -201,12 +318,13 @@ pub(crate) fn spawn_exit_watcher(
             .map_or_else(|| process.exit_code().unwrap_or(-1), |_| -1);
         let completion = if wake_on_exit.load(Ordering::Acquire) {
             let output = resolve_aggregated_output(&output_buffer, String::new()).await;
+            let kind = if monitor {
+                ExecKind::Monitor
+            } else {
+                ExecKind::Command
+            };
             Some(ContextualUserFragment::into(ExecCompletion::new(
-                &call_id,
-                process_id,
-                &command,
-                exit_code,
-                &output,
+                kind, &call_id, process_id, &command, exit_code, &output,
             )))
         } else {
             None
@@ -274,7 +392,14 @@ impl<const MAX_BYTES: usize> Buffer<MAX_BYTES> {
                 "a frame must fit one UTF-8 scalar"
             )
         };
-        let Self { pending, emitter } = self;
+        let Self {
+            pending,
+            emitter,
+            monitor,
+        } = self;
+        if let Some(monitor) = monitor {
+            monitor.push(&String::from_utf8_lossy(&bytes)).await;
+        }
 
         // Reuse a producer chunk when it fits, retaining only an incomplete
         // UTF-8 suffix for the next push.
@@ -310,12 +435,16 @@ impl<const MAX_BYTES: usize> Buffer<MAX_BYTES> {
         let Self {
             pending,
             mut emitter,
+            monitor,
         } = self;
         debug_assert!(
             pending.len() < char::MAX.len_utf8(),
             "only an incomplete UTF-8 scalar can remain"
         );
         emitter.emit(|| pending).await;
+        if let Some(monitor) = monitor {
+            monitor.flush().await;
+        }
     }
 }
 

@@ -101,7 +101,7 @@ async fn completed_output_preserves_bytes_before_subscription(
     .await;
     assert_eq!(model_output.to_bytes(), b"early\n");
 
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &context, /*monitor*/ None);
     #[allow(deprecated)]
     let cwd = context.step_context.turn.cwd.clone().into();
     spawn_exit_watcher(
@@ -152,7 +152,7 @@ async fn streaming_output_preserves_multibyte_characters_across_chunks() -> anyh
         rx_event,
         context,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &context, /*monitor*/ None);
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -200,7 +200,7 @@ async fn streaming_output_finishes_on_close_without_waiting_for_grace() -> anyho
         context,
         ..
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &context, /*monitor*/ None);
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -245,7 +245,7 @@ async fn streaming_output_keeps_grace_as_fallback_without_close() -> anyhow::Res
         rx_event,
         context,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &context, /*monitor*/ None);
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -298,7 +298,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         mut context,
         rx_event,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &context, /*monitor*/ None);
 
     tokio::time::pause();
     let process_for_late_denial = Arc::clone(&process);
@@ -332,6 +332,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         Some(network_denial_monitor),
         /*plugin_metrics_sidecar*/ None,
         Arc::new(AtomicBool::new(false)),
+        /*monitor*/ false,
     );
 
     let exited_at = Instant::now();
@@ -410,6 +411,7 @@ async fn streaming_output_bounds_invalid_bytes() {
             turn,
             call_id: "bounded-output-test".to_string(),
         },
+        monitor: None,
     };
 
     // The first frame splits 😀; the last allowed frame leaves é incomplete.

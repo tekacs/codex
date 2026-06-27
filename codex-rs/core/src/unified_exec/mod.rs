@@ -129,6 +129,7 @@ pub(crate) struct ExecCommandRequest {
     pub additional_permissions_preapproved: bool,
     pub justification: Option<String>,
     pub prefix_rule: Option<Vec<String>>,
+    pub wake_on_output: bool,
 }
 
 #[derive(Debug)]

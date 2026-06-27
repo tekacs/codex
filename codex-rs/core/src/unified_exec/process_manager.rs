@@ -55,6 +55,7 @@ use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::WriteStdinInteractionEvent;
 use crate::unified_exec::WriteStdinRequest;
+use crate::unified_exec::async_watcher::MonitorWake;
 use crate::unified_exec::async_watcher::emit_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::emit_failed_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::spawn_exit_watcher;
@@ -591,13 +592,22 @@ impl UnifiedExecProcessManager {
         );
         emitter.emit(event_ctx, ToolEventStage::Begin).await;
 
-        start_streaming_output(&process, context);
+        let initial_exec_command_active = Arc::new(AtomicBool::new(true));
+        let monitor = request.wake_on_output.then(|| {
+            MonitorWake::new(
+                Arc::clone(&initial_exec_command_active),
+                request.process_id,
+                request.command.clone(),
+                context.call_id.clone(),
+                Arc::downgrade(&context.session),
+            )
+        });
+        start_streaming_output(&process, context, monitor);
         let start = Instant::now();
         // Persist live sessions before the initial yield wait so interrupting the
         // turn cannot drop the last Arc and terminate the background process.
         let process_started_alive = !process.has_exited() && process.exit_code().is_none();
         let mut initial_exec_command_guard = if process_started_alive {
-            let initial_exec_command_active = Arc::new(AtomicBool::new(true));
             self.store_process(
                 Arc::clone(&process),
                 context,
@@ -615,6 +625,7 @@ impl UnifiedExecProcessManager {
                 metrics_sidecar,
                 Arc::clone(&output_buffer),
                 Arc::clone(&initial_exec_command_active),
+                request.wake_on_output,
             )
             .await;
             InitialExecCommandGuard {
@@ -1205,6 +1216,7 @@ impl UnifiedExecProcessManager {
         metrics_sidecar: Option<PluginMetricsSidecar>,
         output_buffer: Arc<tokio::sync::Mutex<OutputBuffers>>,
         initial_exec_command_active: Arc<AtomicBool>,
+        monitor: bool,
     ) {
         let plugin_metrics_sidecar =
             metrics_sidecar.map(|sidecar| Arc::new(std::sync::Mutex::new(Some(sidecar))));
@@ -1250,6 +1262,7 @@ impl UnifiedExecProcessManager {
             network_denial_monitor,
             plugin_metrics_sidecar,
             wake_on_exit,
+            monitor,
         );
     }
 

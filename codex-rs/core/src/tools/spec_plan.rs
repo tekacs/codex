@@ -1107,6 +1107,7 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));
+        registry.add(ExecCommandHandler::monitor(options));
         registry.add(WriteStdinHandler);
     } else {
         // Managed requirements are the only configuration path that can keep
