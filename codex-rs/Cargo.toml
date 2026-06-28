@@ -587,15 +587,11 @@ debug = "none"
 strip = "symbols"
 
 [profile.release]
-lto = "thin"
 debug = "line-tables-only"
 split-debuginfo = "off"
 # Keep release binaries symbolicateable until packaging has archived the
 # sidecar symbols and stripped the binaries.
 strip = false
-
-# Balance parallel release code generation against binary size.
-codegen-units = 4
 
 [profile.profiling]
 inherits = "release"
