@@ -317,6 +317,7 @@ pub(crate) async fn run_turn(
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
+    let mut bedrock_continuation = BedrockContinuation::default();
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
@@ -433,6 +434,7 @@ pub(crate) async fn run_turn(
                 &mut client_session,
                 &responses_metadata,
                 sampling_request_input,
+                &mut bedrock_continuation,
                 cancellation_token.child_token(),
             )
             .await
@@ -1416,6 +1418,7 @@ async fn run_sampling_request(
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     input: Vec<ResponseItem>,
+    bedrock_continuation: &mut BedrockContinuation,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     let turn_context = Arc::clone(&step_context.turn);
@@ -1474,6 +1477,7 @@ async fn run_sampling_request(
             responses_metadata,
             Arc::clone(&turn_diff_tracker),
             &prompt,
+            bedrock_continuation,
             cancellation_token.child_token(),
         )
         .await
@@ -1483,10 +1487,12 @@ async fn run_sampling_request(
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {
+                    bedrock_continuation.clear(sess.as_ref()).await;
                     sess.set_total_tokens_full(&turn_context).await;
                     return Err(err);
                 }
                 CodexErrorDetails::UsageLimitReached(e) => {
+                    bedrock_continuation.clear(sess.as_ref()).await;
                     let rate_limits = e.rate_limits.clone();
                     if let Some(rate_limits) = rate_limits {
                         sess.update_rate_limits(&turn_context, *rate_limits).await;
@@ -1502,10 +1508,11 @@ async fn run_sampling_request(
         }
 
         if !err.is_retryable() {
+            bedrock_continuation.clear(sess.as_ref()).await;
             return Err(err);
         }
 
-        handle_retryable_response_stream_error(
+        if let Err(err) = handle_retryable_response_stream_error(
             &mut retry_state,
             max_retries,
             err,
@@ -1514,7 +1521,11 @@ async fn run_sampling_request(
             &turn_context,
             ResponsesStreamRequest::Sampling,
         )
-        .await?;
+        .await
+        {
+            bedrock_continuation.clear(sess.as_ref()).await;
+            return Err(err);
+        }
         turn_context.turn_timing_state.record_sampling_retry();
     }
 }
@@ -1659,6 +1670,57 @@ pub(crate) async fn built_tools(
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct BedrockContinuation {
+    history_item_ids: Vec<String>,
+}
+
+impl BedrockContinuation {
+    fn is_deferable_item(item: &ResponseItem) -> bool {
+        match item {
+            ResponseItem::Message { role, phase, .. } => {
+                role == "assistant" && !matches!(phase, Some(MessagePhase::Commentary))
+            }
+            ResponseItem::Reasoning { .. } => true,
+            ResponseItem::AdditionalTools { .. }
+            | ResponseItem::AgentMessage { .. }
+            | ResponseItem::LocalShellCall { .. }
+            | ResponseItem::FunctionCall { .. }
+            | ResponseItem::ToolSearchCall { .. }
+            | ResponseItem::FunctionCallOutput { .. }
+            | ResponseItem::CustomToolCall { .. }
+            | ResponseItem::CustomToolCallOutput { .. }
+            | ResponseItem::ToolSearchOutput { .. }
+            | ResponseItem::WebSearchCall { .. }
+            | ResponseItem::ImageGenerationCall { .. }
+            | ResponseItem::Compaction { .. }
+            | ResponseItem::CompactionTrigger { .. }
+            | ResponseItem::ContextCompaction { .. }
+            | ResponseItem::ConfigurationUpdate { .. }
+            | ResponseItem::Other => false,
+        }
+    }
+
+    async fn clear(&mut self, sess: &Session) {
+        if self.history_item_ids.is_empty() {
+            return;
+        }
+        sess.remove_history_items_by_id(&self.history_item_ids)
+            .await;
+        self.history_item_ids.clear();
+    }
+
+    async fn replace_history_only(
+        &mut self,
+        sess: &Session,
+        turn_context: &TurnContext,
+        items: &[ResponseItem],
+    ) {
+        self.clear(sess).await;
+        self.history_item_ids = sess.record_history_only(turn_context, items).await;
+    }
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -2066,6 +2128,11 @@ async fn flush_assistant_text_segments_all(
     }
 }
 
+fn response_item_completes_active_item(item: &ResponseItem, active: &TurnItem) -> bool {
+    item.id()
+        .is_none_or(|item_id| item_id.as_str() == active.id().as_str())
+}
+
 /// Emit completion for plan items by parsing the finalized assistant message.
 async fn maybe_complete_plan_item_from_message(
     sess: &Session,
@@ -2272,6 +2339,7 @@ async fn try_run_sampling_request(
     responses_metadata: &CodexResponsesMetadata,
     turn_diff_tracker: SharedTurnDiffTracker,
     prompt: &Prompt,
+    bedrock_continuation: &mut BedrockContinuation,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
     let turn_context = Arc::clone(&step_context.turn);
@@ -2333,6 +2401,8 @@ async fn try_run_sampling_request(
     let plan_mode = turn_context.mode() == ModeKind::Plan;
     let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
     let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
+    let defer_bedrock_final_answer = turn_context.provider.info().is_amazon_bedrock();
+    let mut deferred_bedrock_items = Vec::new();
     let defer_streamed_turn_items_for_contributors =
         !sess.services.extensions.turn_item_contributors().is_empty();
     let mut active_item_is_streaming_to_client = false;
@@ -2409,13 +2479,24 @@ async fn try_run_sampling_request(
                 {
                     sess.send_event(&turn_context, event).await;
                 }
-                let previously_active_item = active_item.take();
-                let previously_streamed_item = if active_item_is_streaming_to_client {
-                    previously_active_item
+                let item_completes_active_item = active_item
+                    .as_ref()
+                    .is_some_and(|active| response_item_completes_active_item(&item, active));
+                let previously_active_item = item_completes_active_item
+                    .then(|| active_item.take())
+                    .flatten();
+                let previously_streamed_item = if item_completes_active_item {
+                    if active_item_is_streaming_to_client {
+                        previously_active_item
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
-                active_item_is_streaming_to_client = false;
+                if item_completes_active_item {
+                    active_item_is_streaming_to_client = false;
+                }
                 if let Some(previous) = previously_streamed_item.as_ref()
                     && matches!(previous, TurnItem::AgentMessage(_))
                 {
@@ -2428,6 +2509,10 @@ async fn try_run_sampling_request(
                         &item_id,
                     )
                     .await;
+                }
+                if defer_bedrock_final_answer && BedrockContinuation::is_deferable_item(&item) {
+                    deferred_bedrock_items.push(item);
+                    continue;
                 }
                 if let Some(state) = plan_mode_state.as_mut()
                     && handle_assistant_item_done_in_plan_mode(
@@ -2514,6 +2599,8 @@ async fn try_run_sampling_request(
                 } else if matches!(&item, ResponseItem::FunctionCall { .. }) {
                     active_tool_argument_diff_consumer = None;
                 }
+                let defer_bedrock_item =
+                    defer_bedrock_final_answer && BedrockContinuation::is_deferable_item(&item);
                 if let Some(turn_item) = handle_non_tool_response_item(
                     sess.as_ref(),
                     TurnItemContributorPolicy::Skip,
@@ -2523,7 +2610,8 @@ async fn try_run_sampling_request(
                 .await
                 {
                     let mut turn_item = turn_item;
-                    let stream_item_to_client = !defer_streamed_turn_items_for_contributors;
+                    let stream_item_to_client =
+                        !defer_streamed_turn_items_for_contributors && !defer_bedrock_item;
                     let mut seeded_parsed: Option<ParsedAssistantTextDelta> = None;
                     let mut seeded_item_id: Option<String> = None;
                     if stream_item_to_client
@@ -2661,6 +2749,67 @@ async fn try_run_sampling_request(
                     usage_metadata.as_ref(),
                 )
                 .await;
+                if defer_bedrock_final_answer {
+                    if let Some(false) = end_turn {
+                        if !deferred_bedrock_items.is_empty() {
+                            bedrock_continuation
+                                .replace_history_only(
+                                    sess.as_ref(),
+                                    turn_context.as_ref(),
+                                    &deferred_bedrock_items,
+                                )
+                                .await;
+                        }
+                    } else {
+                        bedrock_continuation.clear(sess.as_ref()).await;
+                        let mut deferred_error = None;
+                        for item in std::mem::take(&mut deferred_bedrock_items) {
+                            if let Some(state) = plan_mode_state.as_mut()
+                                && handle_assistant_item_done_in_plan_mode(
+                                    &sess,
+                                    &turn_context,
+                                    turn_store.as_ref(),
+                                    &item,
+                                    state,
+                                    /*previously_active_item*/ None,
+                                    &mut last_agent_message,
+                                )
+                                .await
+                            {
+                                continue;
+                            }
+
+                            let mut ctx = HandleOutputCtx {
+                                sess: sess.clone(),
+                                turn_context: turn_context.clone(),
+                                turn_store: Arc::clone(&turn_store),
+                                tool_runtime: tool_runtime.clone(),
+                                cancellation_token: cancellation_token.child_token(),
+                            };
+                            let output_result = match handle_output_item_done(
+                                &mut ctx, item, /*previously_active_item*/ None,
+                            )
+                            .await
+                            {
+                                Ok(output_result) => output_result,
+                                Err(err) => {
+                                    deferred_error = Some(err);
+                                    break;
+                                }
+                            };
+                            if let Some(tool_future) = output_result.tool_future {
+                                in_flight.push_back(tool_future);
+                            }
+                            if let Some(agent_message) = output_result.last_agent_message {
+                                last_agent_message = Some(agent_message);
+                            }
+                            needs_follow_up |= output_result.needs_follow_up;
+                        }
+                        if let Some(err) = deferred_error {
+                            break Err(err);
+                        }
+                    }
+                }
                 let budget_result = sess
                     .record_token_usage_info(&turn_context, token_usage.as_ref())
                     .await;

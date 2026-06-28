@@ -76,11 +76,11 @@ use codex_login::default_client::create_client_for_route;
 use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
 use codex_protocol::ResponseItemId;
-use codex_protocol::auth::AuthMode;
-
 use codex_protocol::ThreadId;
+use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -127,6 +127,7 @@ use crate::cyber_access_program;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
+use crate::stream_events_utils::raw_assistant_output_text_from_item;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_feedback::FeedbackRequestTags;
 use codex_feedback::emit_feedback_request_tags_with_auth_env;
@@ -332,6 +333,207 @@ pub struct ModelClientSession {
 struct LastResponse {
     response_id: String,
     items_added: Vec<ResponseItem>,
+}
+
+#[derive(Debug, Default)]
+struct CumulativeOutputTextDeltaNormalizer {
+    text: String,
+}
+
+impl CumulativeOutputTextDeltaNormalizer {
+    fn seed_from_item(&mut self, item: &ResponseItem) {
+        self.text = raw_assistant_output_text_from_item(item).unwrap_or_default();
+    }
+
+    fn reset(&mut self) {
+        self.text.clear();
+    }
+
+    fn normalize(&mut self, text: String) -> String {
+        if let Some(delta) = text.strip_prefix(&self.text) {
+            let delta = delta.to_string();
+            self.text = text;
+            delta
+        } else {
+            self.text.push_str(&text);
+            text
+        }
+    }
+}
+
+#[derive(Debug)]
+enum CumulativeAssistantMessageDoneEvent {
+    PassThrough(ResponseItem),
+    PassThroughInterleaved(ResponseItem),
+    Started {
+        item: ResponseItem,
+        delta: String,
+    },
+    Delta {
+        full_text: String,
+        delta: String,
+    },
+    FlushAndPassThrough {
+        done: ResponseItem,
+        item: ResponseItem,
+    },
+    FlushAndStarted {
+        done: ResponseItem,
+        started: ResponseItem,
+        delta: String,
+    },
+}
+
+fn assistant_message_started_item(mut item: ResponseItem) -> ResponseItem {
+    if let ResponseItem::Message { role, content, .. } = &mut item
+        && role == "assistant"
+    {
+        for content_item in content {
+            if let ContentItem::OutputText { text } = content_item {
+                text.clear();
+            }
+        }
+    }
+    item
+}
+
+#[derive(Debug, Default)]
+struct CumulativeAssistantMessageDoneNormalizer {
+    item_id: Option<ResponseItemId>,
+    pending_done_item: Option<ResponseItem>,
+    text: String,
+}
+
+impl CumulativeAssistantMessageDoneNormalizer {
+    fn reset(&mut self) {
+        self.item_id = None;
+        self.pending_done_item = None;
+        self.text.clear();
+    }
+
+    fn take_pending_done_item(&mut self) -> Option<ResponseItem> {
+        let item = self.pending_done_item.take();
+        self.item_id = None;
+        self.text.clear();
+        item
+    }
+
+    fn normalize(&mut self, item: ResponseItem) -> CumulativeAssistantMessageDoneEvent {
+        let Some(text) = raw_assistant_output_text_from_item(&item) else {
+            if self.pending_done_item.is_some() && matches!(item, ResponseItem::Reasoning { .. }) {
+                return CumulativeAssistantMessageDoneEvent::PassThroughInterleaved(item);
+            }
+
+            return match self.take_pending_done_item() {
+                Some(done) => {
+                    CumulativeAssistantMessageDoneEvent::FlushAndPassThrough { done, item }
+                }
+                None => CumulativeAssistantMessageDoneEvent::PassThrough(item),
+            };
+        };
+
+        if self.pending_done_item.is_none() {
+            return self.start(item, text);
+        }
+
+        if let Some(delta) = text.strip_prefix(&self.text) {
+            let delta = delta.to_string();
+            let mut pending = item;
+            pending.set_id(self.item_id.clone());
+            self.pending_done_item = Some(pending);
+            self.text = text.clone();
+            return CumulativeAssistantMessageDoneEvent::Delta {
+                full_text: text,
+                delta,
+            };
+        }
+
+        let done = self
+            .take_pending_done_item()
+            .expect("pending item checked above");
+        match self.start(item, text) {
+            CumulativeAssistantMessageDoneEvent::Started { item, delta } => {
+                debug_assert!(
+                    !delta.is_empty(),
+                    "starting a new cumulative assistant message must produce an initial delta"
+                );
+                CumulativeAssistantMessageDoneEvent::FlushAndStarted {
+                    done,
+                    started: item,
+                    delta,
+                }
+            }
+            _ => unreachable!("starting a new cumulative assistant message must emit Started"),
+        }
+    }
+
+    fn start(&mut self, item: ResponseItem, text: String) -> CumulativeAssistantMessageDoneEvent {
+        self.item_id = item.id().cloned();
+        self.pending_done_item = Some(item.clone());
+        self.text = text.clone();
+        CumulativeAssistantMessageDoneEvent::Started {
+            item: assistant_message_started_item(item),
+            delta: text,
+        }
+    }
+}
+
+async fn send_response_event_or_cancel(
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    inference_trace_attempt: &InferenceTraceAttempt,
+    upstream_request_id: Option<&str>,
+    items_added: &[ResponseItem],
+    event: ResponseEvent,
+) -> bool {
+    if tx_event.send(Ok(event)).await.is_err() {
+        inference_trace_attempt.record_cancelled(
+            STREAM_DROPPED_REASON,
+            upstream_request_id,
+            items_added,
+        );
+        false
+    } else {
+        true
+    }
+}
+
+async fn send_output_text_delta_or_cancel(
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    inference_trace_attempt: &InferenceTraceAttempt,
+    upstream_request_id: Option<&str>,
+    items_added: &[ResponseItem],
+    delta: String,
+) -> bool {
+    if delta.is_empty() {
+        true
+    } else {
+        send_response_event_or_cancel(
+            tx_event,
+            inference_trace_attempt,
+            upstream_request_id,
+            items_added,
+            ResponseEvent::OutputTextDelta(delta),
+        )
+        .await
+    }
+}
+
+async fn send_output_item_done_or_cancel(
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    inference_trace_attempt: &InferenceTraceAttempt,
+    upstream_request_id: Option<&str>,
+    items_added: &mut Vec<ResponseItem>,
+    item: ResponseItem,
+) -> bool {
+    items_added.push(item.clone());
+    send_response_event_or_cancel(
+        tx_event,
+        inference_trace_attempt,
+        upstream_request_id,
+        items_added,
+        ResponseEvent::OutputItemDone(item),
+    )
+    .await
 }
 
 #[derive(Debug, Default)]
@@ -2222,6 +2424,11 @@ where
         let mut tx_last_response = Some(tx_last_response);
         let mut items_added: Vec<ResponseItem> = Vec::new();
         let (request_start, mut ttft_ms) = (Instant::now(), None);
+        let normalize_bedrock_cumulative_events = provider.info().is_amazon_bedrock();
+        let mut bedrock_streamed_assistant_item_id: Option<ResponseItemId> = None;
+        let mut output_text_delta_normalizer = CumulativeOutputTextDeltaNormalizer::default();
+        let mut assistant_message_done_normalizer =
+            CumulativeAssistantMessageDoneNormalizer::default();
         let mut api_stream = api_stream;
         let upstream_request_id = upstream_request_id.as_deref();
         if let Some(upstream_request_id) = upstream_request_id {
@@ -2243,7 +2450,262 @@ where
                 break;
             };
             match event {
+                Ok(event @ ResponseEvent::Created { .. }) => {
+                    if normalize_bedrock_cumulative_events {
+                        bedrock_streamed_assistant_item_id = None;
+                        output_text_delta_normalizer.reset();
+                        assistant_message_done_normalizer.reset();
+                    }
+                    if tx_event.send(Ok(event)).await.is_err() {
+                        inference_trace_attempt.record_cancelled(
+                            STREAM_DROPPED_REASON,
+                            upstream_request_id,
+                            &items_added,
+                        );
+                        return;
+                    }
+                }
+                Ok(ResponseEvent::OutputItemAdded(item)) => {
+                    if normalize_bedrock_cumulative_events {
+                        if let Some(done) =
+                            assistant_message_done_normalizer.take_pending_done_item()
+                            && !send_output_item_done_or_cancel(
+                                &tx_event,
+                                &inference_trace_attempt,
+                                upstream_request_id,
+                                &mut items_added,
+                                done,
+                            )
+                            .await
+                        {
+                            return;
+                        }
+                        bedrock_streamed_assistant_item_id = None;
+                        if let Some(delta) = raw_assistant_output_text_from_item(&item) {
+                            output_text_delta_normalizer.text = delta.clone();
+                            bedrock_streamed_assistant_item_id = item.id().cloned();
+                            let item = assistant_message_started_item(item);
+                            if !send_response_event_or_cancel(
+                                &tx_event,
+                                &inference_trace_attempt,
+                                upstream_request_id,
+                                &items_added,
+                                ResponseEvent::OutputItemAdded(item),
+                            )
+                            .await
+                            {
+                                return;
+                            }
+                            if !send_output_text_delta_or_cancel(
+                                &tx_event,
+                                &inference_trace_attempt,
+                                upstream_request_id,
+                                &items_added,
+                                delta,
+                            )
+                            .await
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+                        output_text_delta_normalizer.seed_from_item(&item);
+                    }
+                    if tx_event
+                        .send(Ok(ResponseEvent::OutputItemAdded(item)))
+                        .await
+                        .is_err()
+                    {
+                        inference_trace_attempt.record_cancelled(
+                            STREAM_DROPPED_REASON,
+                            upstream_request_id,
+                            &items_added,
+                        );
+                        return;
+                    }
+                }
+                Ok(ResponseEvent::OutputTextDelta(delta))
+                    if normalize_bedrock_cumulative_events =>
+                {
+                    let delta = output_text_delta_normalizer.normalize(delta);
+                    if delta.is_empty() {
+                        continue;
+                    }
+                    if !send_output_text_delta_or_cancel(
+                        &tx_event,
+                        &inference_trace_attempt,
+                        upstream_request_id,
+                        &items_added,
+                        delta,
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                }
                 Ok(ResponseEvent::OutputItemDone(item)) => {
+                    if normalize_bedrock_cumulative_events {
+                        if raw_assistant_output_text_from_item(&item).is_some()
+                            && bedrock_streamed_assistant_item_id.as_ref() == item.id()
+                        {
+                            bedrock_streamed_assistant_item_id = None;
+                            output_text_delta_normalizer.reset();
+                            assistant_message_done_normalizer.reset();
+                            if !send_output_item_done_or_cancel(
+                                &tx_event,
+                                &inference_trace_attempt,
+                                upstream_request_id,
+                                &mut items_added,
+                                item,
+                            )
+                            .await
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+                        match assistant_message_done_normalizer.normalize(item) {
+                            CumulativeAssistantMessageDoneEvent::PassThrough(item) => {
+                                bedrock_streamed_assistant_item_id = None;
+                                output_text_delta_normalizer.reset();
+                                if !send_output_item_done_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &mut items_added,
+                                    item,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            CumulativeAssistantMessageDoneEvent::PassThroughInterleaved(item) => {
+                                if !send_output_item_done_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &mut items_added,
+                                    item,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            CumulativeAssistantMessageDoneEvent::Started { item, delta } => {
+                                output_text_delta_normalizer.text = delta.clone();
+                                bedrock_streamed_assistant_item_id = item.id().cloned();
+                                if !send_response_event_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &items_added,
+                                    ResponseEvent::OutputItemAdded(item),
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                if !send_output_text_delta_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &items_added,
+                                    delta,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            CumulativeAssistantMessageDoneEvent::Delta { full_text, delta } => {
+                                output_text_delta_normalizer.text = full_text;
+                                if !send_output_text_delta_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &items_added,
+                                    delta,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            CumulativeAssistantMessageDoneEvent::FlushAndPassThrough {
+                                done,
+                                item,
+                            } => {
+                                output_text_delta_normalizer.reset();
+                                if !send_output_item_done_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &mut items_added,
+                                    done,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                bedrock_streamed_assistant_item_id = None;
+                                if !send_output_item_done_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &mut items_added,
+                                    item,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            CumulativeAssistantMessageDoneEvent::FlushAndStarted {
+                                done,
+                                started,
+                                delta,
+                            } => {
+                                if !send_output_item_done_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &mut items_added,
+                                    done,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                output_text_delta_normalizer.text = delta.clone();
+                                bedrock_streamed_assistant_item_id = started.id().cloned();
+                                if !send_response_event_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &items_added,
+                                    ResponseEvent::OutputItemAdded(started),
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                if !send_output_text_delta_or_cancel(
+                                    &tx_event,
+                                    &inference_trace_attempt,
+                                    upstream_request_id,
+                                    &items_added,
+                                    delta,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     items_added.push(item.clone());
                     if tx_event
                         .send(Ok(ResponseEvent::OutputItemDone(item)))
@@ -2267,6 +2729,23 @@ where
                     feedback_tags!(last_model_response_id = &response_id);
                     if let Some(usage) = &token_usage {
                         session_telemetry.sse_event_completed(usage, ttft_ms);
+                    }
+                    if normalize_bedrock_cumulative_events
+                        && let Some(done) =
+                            assistant_message_done_normalizer.take_pending_done_item()
+                    {
+                        if !send_output_item_done_or_cancel(
+                            &tx_event,
+                            &inference_trace_attempt,
+                            upstream_request_id,
+                            &mut items_added,
+                            done,
+                        )
+                        .await
+                        {
+                            return;
+                        }
+                        bedrock_streamed_assistant_item_id = None;
                     }
                     inference_trace_attempt.record_completed(
                         &response_id,

@@ -13,6 +13,7 @@ use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
 use crate::responses_metadata::CodexResponsesMetadata;
+use crate::stream_events_utils::raw_assistant_output_text_from_item;
 use crate::test_support::TestCodexResponsesRequestKind;
 use crate::test_support::responses_metadata as test_responses_metadata;
 use codex_api::AgentIdentityTelemetry;
@@ -873,6 +874,226 @@ async fn response_stream_records_last_model_feedback_ids() {
         tags.get("last_model_response_id").map(String::as_str),
         Some("\"resp-123\"")
     );
+}
+
+#[tokio::test]
+async fn bedrock_response_stream_normalizes_cumulative_output_text_deltas() -> anyhow::Result<()> {
+    let provider = create_model_provider(
+        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
+        /*auth_manager*/ None,
+    );
+    let api_stream = futures::stream::iter([
+        Ok(ResponseEvent::Created {
+            guardian_ticket: None,
+        }),
+        Ok(ResponseEvent::OutputItemAdded(output_message(
+            "msg-1", "Yes",
+        ))),
+        Ok(ResponseEvent::OutputTextDelta("Yes.".to_string())),
+        Ok(ResponseEvent::OutputTextDelta("Yes. The".to_string())),
+        Ok(ResponseEvent::OutputTextDelta(
+            "Yes. The intended shape".to_string(),
+        )),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-1",
+            "Yes. The intended shape",
+        ))),
+        Ok(ResponseEvent::Completed {
+            response_id: "resp-1".to_string(),
+            token_usage: None,
+            usage_metadata: None,
+            end_turn: Some(true),
+        }),
+    ]);
+
+    let (mut stream, _) = super::map_response_events(
+        /*upstream_request_id*/ None,
+        api_stream,
+        test_session_telemetry(),
+        InferenceTraceAttempt::disabled(),
+        provider,
+    );
+    let mut deltas = Vec::new();
+    let mut added_text = None;
+    while let Some(event) = stream.next().await {
+        match event? {
+            ResponseEvent::OutputItemAdded(item) => {
+                added_text = raw_assistant_output_text_from_item(&item);
+            }
+            ResponseEvent::OutputTextDelta(delta) => {
+                deltas.push(delta);
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(added_text.as_deref(), Some(""));
+    assert_eq!(deltas, vec!["Yes", ".", " The", " intended shape"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn bedrock_response_stream_normalizes_cumulative_done_snapshots() -> anyhow::Result<()> {
+    let provider = create_model_provider(
+        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
+        /*auth_manager*/ None,
+    );
+    let api_stream = futures::stream::iter([
+        Ok(ResponseEvent::Created {
+            guardian_ticket: None,
+        }),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-1", "Yes",
+        ))),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-2", "Yes. The",
+        ))),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-3",
+            "Yes. The intended shape",
+        ))),
+        Ok(ResponseEvent::Completed {
+            response_id: "resp-1".to_string(),
+            token_usage: None,
+            usage_metadata: None,
+            end_turn: Some(true),
+        }),
+    ]);
+
+    let (mut stream, _) = super::map_response_events(
+        /*upstream_request_id*/ None,
+        api_stream,
+        test_session_telemetry(),
+        InferenceTraceAttempt::disabled(),
+        provider,
+    );
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event?);
+    }
+
+    assert_eq!(events.len(), 7);
+    assert!(matches!(events[0], ResponseEvent::Created { .. }));
+    assert_message_event(&events[1], "added", "msg-1", "");
+    assert_delta_event(&events[2], "Yes");
+    assert_delta_event(&events[3], ". The");
+    assert_delta_event(&events[4], " intended shape");
+    assert_message_event(&events[5], "done", "msg-1", "Yes. The intended shape");
+    assert!(
+        matches!(events[6], ResponseEvent::Completed { .. }),
+        "expected completed event, got {:?}",
+        events[6]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn bedrock_response_stream_normalizes_interleaved_reasoning_and_done_snapshots()
+-> anyhow::Result<()> {
+    let provider = create_model_provider(
+        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
+        /*auth_manager*/ None,
+    );
+    let api_stream = futures::stream::iter([
+        Ok(ResponseEvent::Created {
+            guardian_ticket: None,
+        }),
+        Ok(ResponseEvent::OutputItemDone(reasoning_item("rs-1"))),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-1", "Yes",
+        ))),
+        Ok(ResponseEvent::OutputItemDone(reasoning_item("rs-2"))),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-2", "Yes. The",
+        ))),
+        Ok(ResponseEvent::OutputItemDone(reasoning_item("rs-3"))),
+        Ok(ResponseEvent::OutputItemDone(output_message(
+            "msg-3",
+            "Yes. The intended shape",
+        ))),
+        Ok(ResponseEvent::Completed {
+            response_id: "resp-1".to_string(),
+            token_usage: None,
+            usage_metadata: None,
+            end_turn: Some(true),
+        }),
+    ]);
+
+    let (mut stream, _) = super::map_response_events(
+        /*upstream_request_id*/ None,
+        api_stream,
+        test_session_telemetry(),
+        InferenceTraceAttempt::disabled(),
+        provider,
+    );
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event?);
+    }
+
+    assert_eq!(events.len(), 10);
+    assert!(matches!(events[0], ResponseEvent::Created { .. }));
+    assert_reasoning_event(&events[1], "rs-1");
+    assert_message_event(&events[2], "added", "msg-1", "");
+    assert_delta_event(&events[3], "Yes");
+    assert_reasoning_event(&events[4], "rs-2");
+    assert_delta_event(&events[5], ". The");
+    assert_reasoning_event(&events[6], "rs-3");
+    assert_delta_event(&events[7], " intended shape");
+    assert_message_event(&events[8], "done", "msg-1", "Yes. The intended shape");
+    assert!(
+        matches!(events[9], ResponseEvent::Completed { .. }),
+        "expected completed event, got {:?}",
+        events[9]
+    );
+    Ok(())
+}
+
+fn assert_message_event(event: &ResponseEvent, kind: &str, expected_id: &str, expected_text: &str) {
+    let item = match (kind, event) {
+        ("added", ResponseEvent::OutputItemAdded(item)) => item,
+        ("done", ResponseEvent::OutputItemDone(item)) => item,
+        _ => panic!("expected {kind} message event, got {event:?}"),
+    };
+    assert_eq!(
+        item.id(),
+        Some(&codex_protocol::ResponseItemId::with_suffix(
+            "msg",
+            expected_id
+        ))
+    );
+    assert_eq!(
+        raw_assistant_output_text_from_item(item).as_deref(),
+        Some(expected_text)
+    );
+}
+
+fn assert_reasoning_event(event: &ResponseEvent, expected_id: &str) {
+    assert!(
+        matches!(
+            event,
+            ResponseEvent::OutputItemDone(ResponseItem::Reasoning { id: Some(id), .. })
+                if id.as_str() == expected_id
+        ),
+        "expected reasoning item {expected_id:?}, got {event:?}"
+    );
+}
+
+fn assert_delta_event(event: &ResponseEvent, expected_delta: &str) {
+    assert!(
+        matches!(event, ResponseEvent::OutputTextDelta(delta) if delta == expected_delta),
+        "expected delta {expected_delta:?}, got {event:?}"
+    );
+}
+
+fn reasoning_item(id: &str) -> ResponseItem {
+    ResponseItem::Reasoning {
+        id: Some(codex_protocol::ResponseItemId::from_server(id.to_string())),
+        summary: Vec::new(),
+        content: None,
+        encrypted_content: Some(format!("encrypted-{id}")),
+        internal_chat_message_metadata_passthrough: None,
+    }
 }
 
 #[tokio::test]

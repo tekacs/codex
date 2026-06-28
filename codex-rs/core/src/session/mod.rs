@@ -3403,6 +3403,37 @@ impl Session {
             .await;
     }
 
+    pub(crate) async fn record_history_only(
+        &self,
+        turn_context: &TurnContext,
+        items: &[ResponseItem],
+    ) -> Vec<String> {
+        let (items, _) = self.prepare_conversation_items_for_history(turn_context, items);
+        let items = items.as_ref();
+        let item_ids = items
+            .iter()
+            .filter_map(|item| item.id().map(ToString::to_string))
+            .collect();
+        {
+            let mut state = self.state.lock().await;
+            state.current_time_reminder.note_recorded_items(items);
+            state.record_items(
+                items.iter(),
+                turn_context.model_info().truncation_policy.into(),
+            );
+        }
+        item_ids
+    }
+
+    pub(crate) async fn remove_history_items_by_id(&self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return false;
+        }
+
+        let mut state = self.state.lock().await;
+        state.remove_history_items_by_id(ids)
+    }
+
     pub(crate) async fn record_step_world_state_if_changed(
         &self,
         previous_world_state: &Arc<WorldState>,

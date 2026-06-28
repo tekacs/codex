@@ -102,6 +102,10 @@ impl SessionState {
         self.history.record_items(items, policy);
     }
 
+    pub(crate) fn remove_history_items_by_id(&mut self, ids: &[String]) -> bool {
+        self.history.remove_items_by_id(ids)
+    }
+
     pub(crate) fn previous_turn_settings(&self) -> Option<PreviousTurnSettings> {
         self.previous_turn_settings.clone()
     }

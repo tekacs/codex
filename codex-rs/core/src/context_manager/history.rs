@@ -52,6 +52,7 @@ use codex_utils_output_truncation::approx_bytes_for_tokens;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::approx_tokens_from_byte_count_i64;
 use codex_utils_output_truncation::truncate_function_output_payload;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -505,6 +506,23 @@ impl ContextManager {
             normalize::remove_corresponding_for(items, &removed.item);
             self.world_state_baseline = None;
         }
+    }
+
+    pub(crate) fn remove_items_by_id(&mut self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return false;
+        }
+
+        let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let items = Arc::make_mut(&mut self.items);
+        let original_len = items.len();
+        items.retain(|item| item.id().is_none_or(|id| !ids.contains(id.as_str())));
+        let removed = items.len() != original_len;
+        if removed {
+            self.history_version = self.history_version.saturating_add(1);
+            self.world_state_baseline = None;
+        }
+        removed
     }
 
     #[cfg(test)]
