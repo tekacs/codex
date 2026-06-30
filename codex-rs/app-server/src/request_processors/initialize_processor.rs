@@ -210,7 +210,11 @@ impl InitializeRequestProcessor {
             }
         }
 
-        let user_agent = if name == "codex-backend" { remote_control_user_agent_if_ready().unwrap_or_else(get_codex_user_agent) } else { get_codex_user_agent() };
+        let user_agent = if name == "codex-backend" {
+            remote_control_user_agent_if_ready().unwrap_or_else(get_codex_user_agent)
+        } else {
+            get_codex_user_agent()
+        };
         let response = InitializeResponse {
             user_agent,
             codex_home,

@@ -191,11 +191,35 @@ impl ChatWidget {
         )
     }
 
-    pub(super) fn queue_user_message_with_options_and_source(&mut self, user_message: UserMessage, action: QueuedInputAction, pending_pastes: Vec<(String,String)>, source: UserMessageSource) -> bool {
-        self.queue_user_message_with_source_and_overrides(user_message,action,pending_pastes,source,UserTurnOverrides::default())
+    pub(super) fn queue_user_message_with_options_and_source(
+        &mut self,
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        pending_pastes: Vec<(String, String)>,
+        source: UserMessageSource,
+    ) -> bool {
+        self.queue_user_message_with_source_and_overrides(
+            user_message,
+            action,
+            pending_pastes,
+            source,
+            UserTurnOverrides::default(),
+        )
     }
-    fn queue_user_message_with_options_and_overrides(&mut self, user_message: UserMessage, action: QueuedInputAction, pending_pastes: Vec<(String,String)>, overrides: UserTurnOverrides) -> bool {
-        self.queue_user_message_with_source_and_overrides(user_message,action,pending_pastes,UserMessageSource::Prompt,overrides)
+    fn queue_user_message_with_options_and_overrides(
+        &mut self,
+        user_message: UserMessage,
+        action: QueuedInputAction,
+        pending_pastes: Vec<(String, String)>,
+        overrides: UserTurnOverrides,
+    ) -> bool {
+        self.queue_user_message_with_source_and_overrides(
+            user_message,
+            action,
+            pending_pastes,
+            UserMessageSource::Prompt,
+            overrides,
+        )
     }
     fn queue_user_message_with_source_and_overrides(
         &mut self,

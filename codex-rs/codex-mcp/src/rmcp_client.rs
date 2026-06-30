@@ -373,7 +373,8 @@ impl ManagedClientStartup {
                 .await
                 {
                     Ok(result) => {
-                        let mut client = result?.with_read_only_tools(server.requires_read_only_mcp_tools());
+                        let mut client =
+                            result?.with_read_only_tools(server.requires_read_only_mcp_tools());
                         if let Some(resource_update_handler) = resource_update_handler {
                             client.set_resource_update_handler(resource_update_handler);
                         }
