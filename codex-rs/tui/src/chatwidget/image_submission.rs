@@ -16,6 +16,7 @@ pub(super) struct PendingImageSubmission {
     pub(super) message: UserMessage,
     history_record: UserMessageHistoryRecord,
     source: UserMessageSource,
+    overrides: UserTurnOverrides,
     result: oneshot::Receiver<Result<Vec<UserInput>, String>>,
 }
 
@@ -25,6 +26,7 @@ impl ChatWidget {
         message: UserMessage,
         history_record: UserMessageHistoryRecord,
         source: UserMessageSource,
+        overrides: UserTurnOverrides,
     ) {
         let id = uuid::Uuid::new_v4();
         let images = message.local_images.clone();
@@ -52,6 +54,7 @@ impl ChatWidget {
             message,
             history_record,
             source,
+            overrides,
             result,
         });
         self.refresh_pending_input_preview();
@@ -76,7 +79,7 @@ impl ChatWidget {
                     pending.history_record,
                     ShellEscapePolicy::Disallow,
                     pending.source,
-                    UserTurnOverrides::default(),
+                    pending.overrides,
                     Some(images),
                 );
                 if !accepted {
@@ -104,6 +107,7 @@ impl ChatWidget {
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source: pending.source,
+                    overrides: pending.overrides,
                     ..QueuedUserMessage::new(pending.message, QueuedInputAction::Literal)
                 });
             self.input_queue

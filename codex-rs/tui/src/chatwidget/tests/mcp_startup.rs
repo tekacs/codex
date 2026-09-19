@@ -284,6 +284,7 @@ async fn review_during_mcp_startup_preserves_draft_when_foreground_work_is_pendi
                     "image prompt".into(),
                     UserMessageHistoryRecord::UserMessageText,
                     UserMessageSource::Prompt,
+                    UserTurnOverrides::default(),
                 ),
                 "queued" => chat
                     .input_queue

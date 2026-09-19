@@ -181,6 +181,7 @@ impl ChatWidget {
                 queue_index,
                 QueuedUserMessage {
                     source,
+                    overrides,
                     ..QueuedUserMessage::new(
                         user_message,
                         match shell_escape_policy {
@@ -204,7 +205,13 @@ impl ChatWidget {
                 && (shell_escape_policy == ShellEscapePolicy::Disallow
                     || !user_message.text.starts_with('!'));
             tracing::warn!("cannot submit user message before session is configured; queueing");
-            self.input_queue.queued_user_messages.push_front(QueuedUserMessage { source, overrides, ..QueuedUserMessage::from(user_message) });
+            self.input_queue
+                .queued_user_messages
+                .push_front(QueuedUserMessage {
+                    source,
+                    overrides,
+                    ..QueuedUserMessage::from(user_message)
+                });
             self.input_queue
                 .queued_user_message_history_records
                 .push_front(history_record);
@@ -285,6 +292,7 @@ impl ChatWidget {
                 },
                 history_record,
                 source,
+                overrides,
             );
             return (true, None);
         } else {
