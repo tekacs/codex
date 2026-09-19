@@ -3679,9 +3679,12 @@ impl Session {
     pub(crate) async fn record_history_only(
         &self,
         turn_context: &TurnContext,
+        model_info: &ModelInfo,
         items: &[ResponseItem],
     ) -> Vec<String> {
-        let (items, _) = self.prepare_conversation_items_for_history(turn_context, items);
+        let (items, _) = self
+            .prepare_conversation_items_for_history(turn_context, model_info, items)
+            .await;
         let items = items.as_ref();
         let item_ids = items
             .iter()
@@ -3690,10 +3693,7 @@ impl Session {
         {
             let mut state = self.state.lock().await;
             state.current_time_reminder.note_recorded_items(items);
-            state.history.record_items(
-                items.iter(),
-                turn_context.model_info().truncation_policy.into(),
-            );
+            state.history.record_items(items.iter(), model_info.truncation_policy.into());
         }
         item_ids
     }

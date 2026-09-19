@@ -202,7 +202,7 @@ pub(crate) fn create_monitor_command_tool_with_environment_id(
             Some(vec!["cmd".to_string()]),
             Some(false.into()),
         ),
-        output_schema: Some(unified_exec_output_schema()),
+        output_schema: Some(unified_exec_output_schema().into()),
     })
 }
 

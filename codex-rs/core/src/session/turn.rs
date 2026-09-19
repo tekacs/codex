@@ -1920,11 +1920,13 @@ impl BedrockContinuation {
     async fn replace_history_only(
         &mut self,
         sess: &Session,
-        turn_context: &TurnContext,
+        step_context: &StepContext,
         items: &[ResponseItem],
     ) {
         self.clear(sess).await;
-        self.history_item_ids = sess.record_history_only(turn_context, items).await;
+        self.history_item_ids = sess
+            .record_history_only(&step_context.turn, &step_context.settings.model_info, items)
+            .await;
     }
 }
 
@@ -3040,7 +3042,7 @@ async fn try_run_sampling_request(
                             bedrock_continuation
                                 .replace_history_only(
                                     sess.as_ref(),
-                                    turn_context.as_ref(),
+                                    step_context.as_ref(),
                                     &deferred_bedrock_items,
                                 )
                                 .await;
@@ -3052,7 +3054,7 @@ async fn try_run_sampling_request(
                             if let Some(state) = plan_mode_state.as_mut()
                                 && handle_assistant_item_done_in_plan_mode(
                                     &sess,
-                                    &turn_context,
+                                    &step_context,
                                     turn_store.as_ref(),
                                     &item,
                                     state,
@@ -3066,7 +3068,7 @@ async fn try_run_sampling_request(
 
                             let mut ctx = HandleOutputCtx {
                                 sess: sess.clone(),
-                                turn_context: turn_context.clone(),
+                                step_context: Arc::clone(&step_context),
                                 turn_store: Arc::clone(&turn_store),
                                 tool_runtime: tool_runtime.clone(),
                                 cancellation_token: cancellation_token.child_token(),
