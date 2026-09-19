@@ -244,6 +244,7 @@ impl ChatComposer {
                 }
             }
             InputResult::Submitted { .. }
+            | InputResult::SubmittedWithOverrides { .. }
             | InputResult::Queued { .. }
             | InputResult::ParentOwnedInputBlocked => self.dismiss_sparkle(),
             InputResult::CommandWithArgs(_, _, _) | InputResult::None => {
