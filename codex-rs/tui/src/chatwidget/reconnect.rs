@@ -132,10 +132,20 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn reconnect_retrying(&mut self) {
+        self.set_status_header("Reconnecting to app-server…".into());
+        self.set_footer_hint_override(Some(vec![("ctrl+c".into(), "quit".into())]));
+        self.request_redraw();
+    }
+
     pub(crate) fn reconnect_failed(&mut self) {
-        self.set_status_header("Reconnect failed — check the endpoint, then relaunch".into());
+        self.set_footer_hint_override(Some(vec![
+            ("ctrl+r".into(), "retry connection".into()),
+            ("ctrl+c".into(), "quit".into()),
+        ]));
+        self.set_status_header("Reconnect failed — Ctrl+R to retry".into());
         self.add_error_message(
-            "Automatic reconnect could not restore this session. Your draft is still editable. Copy it before quitting with Ctrl+C, then reconnect with the same command.".into(),
+            "Automatic reconnect could not restore this session. Press Ctrl+R to retry. Your draft remains editable; no input will be resent.".into(),
         );
     }
 }

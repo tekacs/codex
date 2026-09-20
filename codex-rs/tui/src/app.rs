@@ -879,6 +879,16 @@ impl App {
         {
             return Ok(AppRunControl::Exit(ExitReason::UserRequested));
         }
+        if self.reconnect.offline
+            && self.reconnect.failed
+            && let TuiEvent::Key(key) = &event
+            && key.kind == KeyEventKind::Press
+            && key.modifiers == KeyModifiers::CONTROL
+            && key.code == KeyCode::Char('r')
+        {
+            self.retry_reconnect();
+            return Ok(AppRunControl::Continue);
+        }
         let screen_size = tui.screen_size_for_event(&event)?;
         if !matches!(
             &event,

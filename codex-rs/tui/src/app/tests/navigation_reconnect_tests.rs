@@ -298,7 +298,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 .lock()
                 .unwrap()
                 .connection_notice =
-                Some("Reconnect failed — agent list is stale; relaunch to retry");
+                Some("Reconnect failed — agent list is stale; Ctrl+R to retry");
             assert_snapshot!(
                 "daemon_command_center_failed",
                 render_bottom_popup(&app.chat_widget, /*width*/ 100)

@@ -399,3 +399,33 @@ async fn lost_initial_thread_reply_keeps_startup_draft_offline() -> Result<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn manual_reconnect_preserves_draft_without_submitting() -> Result<()> {
+    let (mut app, _events, mut ops) = make_test_app_with_channels().await;
+    let mut session = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.app_server_target = AppServerTarget::Remote {
+        endpoint: crate::resolve_remote_addr("ws://127.0.0.1:9")?,
+    };
+    app.chat_widget
+        .restore_user_message_to_composer("keep this draft".into());
+    app.begin_reconnect();
+    app.reconnect.failed = true;
+    app.chat_widget.reconnect_failed();
+    app.handle_tui_event(
+        &mut tui,
+        &mut session,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+    )
+    .await?;
+    assert!(app.reconnect.offline);
+    assert!(!app.reconnect.failed);
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "keep this draft"
+    );
+    assert!(ops.try_recv().is_err());
+    session.shutdown().await?;
+    Ok(())
+}

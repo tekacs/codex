@@ -118,10 +118,11 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
         });
         let server = tokio::spawn(async move {
             let mut methods = Vec::new();
-            for attempt in 0..2 {
+            for attempt in 0..if resume_error_code == -32600 { 1 } else { 2 } {
                 let (stream, _) = listener.accept().await?;
+                let mut resumes = 0;
                 methods.extend(serve_reconnect_requests(tokio_tungstenite::accept_async(stream).await?, |request| std::future::ready(match request.method.as_str() {
-                    "thread/resume" if attempt == 0 => Some(json!({"error": {"code": resume_error_code, "message":
+                    "thread/resume" if { resumes += 1; attempt == 0 && resumes == 1 } => Some(json!({"error": {"code": resume_error_code, "message":
                         if resume_error_code == -32600 {
                             format!("thread {id} is closing; retry thread/resume after the thread is closed")
                         } else {

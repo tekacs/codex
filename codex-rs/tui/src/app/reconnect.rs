@@ -1,5 +1,8 @@
 //! TUI-only out-of-process reconnection. Each attempt initializes a fresh client and rejoins existing
 //! threads using ordinary resume/history semantics; no user operation is retried.
+//! Recovery retries transient failures until its shared deadline, retaining a connected session
+//! while its thread closes. Failures expose only stage and safe error classification.
+//! Ctrl+R starts a fresh recovery budget after exhaustion without resending input.
 //! Offline input and old async completions are quarantined.
 
 use super::*;
@@ -51,55 +54,66 @@ pub(super) async fn reconnect(
     // Connecting already has transport deadlines. Give healthy history/inventory hydration one
     // shared budget instead of repeatedly discarding its progress on a short per-attempt timer.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 120);
-    for delay in [0, 1, 2, 4].into_iter().chain(std::iter::repeat(/*elt*/ 8)) {
+    let mut delay = 0;
+    let mut stage = "connect/initialize";
+    let mut last_failure = "no response".to_string();
+    loop {
         let attempt = async {
             tokio::time::sleep(Duration::from_secs(delay)).await;
+            stage = "connect/initialize";
             let client = crate::app_server_connection::connect(&target).await?;
             let mut session = AppServerSession::new(client, mode)
                 .with_local_codex_home(&config.codex_home)
                 .with_remote_cwd_override(remote_cwd.clone())
                 .with_thread_tool_transport(task_tools.clone());
+            stage = "bootstrap";
             let bootstrap = session.bootstrap(&config).await?;
+            stage = "thread/resume";
             let thread = if let Some(thread_id) = thread_id {
-                match session
-                    .resume_thread(
-                        &local_settings,
-                        config.clone(),
-                        thread_id,
-                        ResumeModelSettings::PreserveExistingThread,
-                    )
-                    .await
-                {
-                    Ok(thread) => Some(thread),
-                    Err(error)
-                        if matches!(
-                            error.downcast_ref::<TypedRequestError>(),
-                            Some(TypedRequestError::Transport { .. })
-                        ) =>
+                loop {
+                    match session
+                        .resume_thread(
+                            &local_settings,
+                            config.clone(),
+                            thread_id,
+                            ResumeModelSettings::PreserveExistingThread,
+                        )
+                        .await
                     {
-                        return Err(error);
+                        Ok(thread) => break Some(thread),
+                        Err(error)
+                            if matches!(
+                                error.downcast_ref::<TypedRequestError>(),
+                                Some(TypedRequestError::Transport { .. })
+                            ) =>
+                        {
+                            return Err(error);
+                        }
+                        // Unloading threads use the same code as unavailable conversations, but
+                        // ordinary resume can reattach once the unload finishes.
+                        Err(error)
+                            if matches!(
+                                error.downcast_ref::<TypedRequestError>(),
+                                Some(TypedRequestError::Server { method, source })
+                                    if method == "thread/resume" && source.code == -32600
+                                        && source.message.starts_with(&format!("thread {thread_id} is closing;"))
+                            ) =>
+                        {
+                            last_failure = "thread is closing".to_string();
+                            tracing::info!(stage, "reconnect waiting for thread to close");
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+                        Err(error)
+                            if matches!(
+                                error.downcast_ref::<TypedRequestError>(),
+                                Some(TypedRequestError::Server { source, .. }) if source.code == -32600
+                            ) || presentation == ReconnectPresentation::Overview =>
+                        {
+                            break None;
+                        }
+                        Err(error) => return Err(error),
                     }
-                    // Unloading threads use the same code as unavailable conversations, but
-                    // ordinary resume can reattach once the unload finishes.
-                    Err(error)
-                        if matches!(
-                            error.downcast_ref::<TypedRequestError>(),
-                            Some(TypedRequestError::Server { method, source })
-                                if method == "thread/resume" && source.code == -32600
-                                    && source.message.starts_with(&format!("thread {thread_id} is closing;"))
-                        ) =>
-                    {
-                        return Err(error);
-                    }
-                    Err(error)
-                        if matches!(
-                            error.downcast_ref::<TypedRequestError>(),
-                            Some(TypedRequestError::Server { source, .. }) if source.code == -32600
-                        ) || presentation == ReconnectPresentation::Overview =>
-                    {
-                        None
-                    }
-                    Err(error) => return Err(error),
                 }
             } else {
                 None
@@ -113,17 +127,50 @@ pub(super) async fn reconnect(
         let result = tokio::time::timeout_at(deadline, attempt).await;
         match result {
             Ok(Ok(connected)) => return Ok(connected),
-            Ok(Err(_)) => {}
+            Ok(Err(error)) => {
+                let (classification, retryable) = classify_failure(&error);
+                last_failure = classification;
+                tracing::warn!(stage, failure = %last_failure, "app-server reconnect attempt failed");
+                if !retryable {
+                    color_eyre::eyre::bail!("Reconnect failed at {stage}: {last_failure}");
+                }
+            }
             Err(_) => break,
         }
-        // Transport errors can contain endpoint credentials. Do not render or log them.
+        delay = (delay * 2).clamp(1, 8);
     }
-    color_eyre::eyre::bail!("app-server session could not be restored")
+    color_eyre::eyre::bail!("Reconnect deadline reached at {stage}; last failure: {last_failure}")
+}
+
+/// Never copy server messages or transport text: either may contain endpoint credentials.
+fn classify_failure(error: &color_eyre::Report) -> (String, bool) {
+    match error.downcast_ref::<TypedRequestError>() {
+        Some(TypedRequestError::Transport { source, .. }) => {
+            (format!("transport {:?}", source.kind()), true)
+        }
+        Some(TypedRequestError::Server { source, .. }) => (
+            format!("server rejected request (code {})", source.code),
+            !matches!(source.code, -32601 | -32602),
+        ),
+        Some(TypedRequestError::Deserialize { .. }) => ("invalid server response".into(), false),
+        None => match error.downcast_ref::<std::io::Error>() {
+            Some(source) => (format!("connection {:?}", source.kind()), true),
+            None => ("connection or session setup failed".into(), true),
+        },
+    }
 }
 
 impl App {
     pub(crate) fn is_offline(&self) -> bool {
         self.reconnect.offline
+    }
+
+    pub(super) fn retry_reconnect(&mut self) {
+        self.reconnect.failed = false;
+        self.chat_widget.reconnect_retrying();
+        if let Ok(mut state) = self.agents_overview.view_state.lock() {
+            state.connection_notice = Some("Reconnecting — agent list is stale");
+        }
     }
 
     // Preserve local choices for future input, without replaying failed settings writes or
