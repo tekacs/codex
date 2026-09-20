@@ -131,6 +131,7 @@ mod notification_media;
 mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
+mod remote_auth;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;
@@ -861,7 +862,7 @@ pub async fn run_main_with_transport_options(
             policy: remote_control_policy,
         },
         state_db.clone(),
-        auth_manager.clone(),
+        remote_auth::resolve(&config, &auth_manager).await?,
         transport_event_tx.clone(),
         remote_control_shutdown_token.clone(),
         app_server_client_name_rx,

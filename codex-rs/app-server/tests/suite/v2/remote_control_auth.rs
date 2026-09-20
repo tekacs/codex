@@ -491,3 +491,30 @@ async fn logout_login_enable_recovers_first_unauthorized_enrollment() -> Result<
     let _websocket = timeout(DEFAULT_TIMEOUT, accept_async(stream)).await??;
     Ok(())
 }
+
+#[tokio::test]
+async fn dedicated_identity_survives_inference_switch() -> Result<()> {
+    let home = TempDir::new()?;
+    let listener = configured_remote_control_listener(home.path()).await?;
+    let remote = home.path().join("remote-control");
+    std::fs::create_dir(&remote)?;
+    write_chatgpt_auth(
+        &remote,
+        ChatGptAuthFixture::new("remote-token")
+            .account_id("remote-account")
+            .chatgpt_account_id("remote-account"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let saved = std::fs::read(remote.join("auth.json"))?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .build_initialized()
+        .await?;
+    login(&mut app, "user-a", "account-a", "initial").await?;
+    let mut relay = open_relay(&mut app, &listener).await?;
+    login(&mut app, "user-b", "account-b", "switched").await?;
+    relay.assert_account(&mut app).await?;
+    assert_eq!(std::fs::read(remote.join("auth.json"))?, saved);
+    Ok(())
+}
