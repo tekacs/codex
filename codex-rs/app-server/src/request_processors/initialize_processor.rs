@@ -210,7 +210,9 @@ impl InitializeRequestProcessor {
             }
         }
 
-        let user_agent = if name == "codex-backend" {
+        // Every relay client sees the enrollment version, regardless of its client name.
+        // Local connections continue to report the actual build version.
+        let user_agent = if session.origin == ConnectionOrigin::RemoteControl {
             remote_control_user_agent_if_ready().unwrap_or_else(get_codex_user_agent)
         } else {
             get_codex_user_agent()
