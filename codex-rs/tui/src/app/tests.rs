@@ -7713,7 +7713,7 @@ async fn remote_exec_resume_current_cwd_is_rejected() -> Result<()> {
     app.environment_manager = Arc::new(
         EnvironmentManager::create_for_tests(
             Some("ws://127.0.0.1:8765".to_string()),
-            Some(codex_exec_server::ExecServerRuntimePaths::new(
+            Some(codex_exec_server::ExecServerRuntimeOptions::new(
                 std::env::current_exe()?,
                 /*codex_linux_sandbox_exe*/ None,
             )?),
@@ -7960,7 +7960,7 @@ async fn in_app_resume_uses_configured_or_explicit_cwd() -> Result<()> {
             Arc::new(
                 EnvironmentManager::create_for_tests(
                     Some("ws://127.0.0.1:8765".to_string()),
-                    Some(codex_exec_server::ExecServerRuntimePaths::new(
+                    Some(codex_exec_server::ExecServerRuntimeOptions::new(
                         std::env::current_exe()?,
                         /*codex_linux_sandbox_exe*/ None,
                     )?),

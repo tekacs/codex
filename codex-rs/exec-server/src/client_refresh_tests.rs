@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 use tokio_util::task::AbortOnDropHandle;
 
 use super::*;
-use crate::ExecServerRuntimePaths;
+use crate::ExecServerRuntimeOptions;
 use crate::NoiseChannelIdentity;
 use crate::ProcessId;
 use crate::noise_relay::stream_handler::NoiseOutboundMessage;
@@ -148,7 +148,7 @@ impl Executor {
         validator: Validator,
         identity: NoiseChannelIdentity,
     ) -> Result<Self> {
-        let processor = ConnectionProcessor::new(ExecServerRuntimePaths::new(
+        let processor = ConnectionProcessor::new(ExecServerRuntimeOptions::new(
             std::env::current_exe()?,
             /*codex_linux_sandbox_exe*/ None,
         )?);
