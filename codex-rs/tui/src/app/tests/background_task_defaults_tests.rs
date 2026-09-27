@@ -820,7 +820,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         .await?;
     assert_eq!(app.chat_widget.thread_id(), Some(startup));
     app.chat_widget.set_model("gpt-local-choice");
-    app.start_fresh_session_with_summary_hint(
+    app.start_fresh_session(
         &mut tui,
         &mut server,
         /*session_start_source*/ None,
