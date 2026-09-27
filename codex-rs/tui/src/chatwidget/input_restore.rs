@@ -562,6 +562,7 @@ impl ChatWidget {
                 .questions
                 .as_deref_mut()
                 .map(crate::bottom_pane::AsyncQuestions::capture),
+            pending_thread_settings: None,
             composer: composer.has_content().then_some(composer),
             safety_buffering_prompt: self.safety_buffering_prompt.clone(),
             safety_buffering_source: self.safety_buffering_source,
