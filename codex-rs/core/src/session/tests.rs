@@ -8462,7 +8462,9 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     assert!(result_sender.is_closed());
 
     assert!(session.services.model_client.responses_websocket_enabled());
-    session.schedule_startup_prewarm().await;
+    session
+        .schedule_startup_prewarm(super::startup_prewarm::PrewarmInput::Base)
+        .await;
     assert!(session.state.lock().await.startup_prewarm.is_none());
 
     assert_eq!(

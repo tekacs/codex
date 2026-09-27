@@ -516,7 +516,7 @@ impl Features {
     }
 
     /// Returns whether persistent execution is enabled for the selected effort.
-    pub fn persistent_mode_enabled(&self, reasoning_effort: Option<&ReasoningEffort>) -> bool {
+    pub fn persistent_execution_enabled(&self, reasoning_effort: Option<&ReasoningEffort>) -> bool {
         reasoning_effort == Some(&ReasoningEffort::Persistent)
     }
 
