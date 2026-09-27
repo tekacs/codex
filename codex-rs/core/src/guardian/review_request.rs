@@ -3,8 +3,10 @@
 
 use super::*;
 use crate::codex_thread::GuardianAuthorizationVersion;
+use codex_config::config_toml::CircuitBreakAction;
 use codex_guardian_reviewer::ReviewHost;
 use codex_protocol::approvals::GuardianReviewReason;
+use codex_protocol::protocol::ErrorEvent;
 
 pub(in crate::guardian) struct PreparedApproval {
     request: GuardianApprovalRequest,
@@ -273,9 +275,14 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
         }
     }
 
-    async fn interrupt(&self, turn_id: &str, warning: EventMsg) {
+    async fn interrupt(&self, turn_id: &str, warning: EventMsg, error: ErrorEvent) {
+        let Some(turn) = self.session.turn_context_for_sub_id(turn_id).await else {
+            return;
+        };
+        let error = (turn.config.guardian_circuit_break_action == CircuitBreakAction::Strict)
+            .then_some(error);
         self.session
-            .interrupt_turn_with_warning(turn_id, warning)
+            .interrupt_turn_with_warning(turn_id, warning, error)
             .await;
     }
 }

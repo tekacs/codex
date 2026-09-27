@@ -547,6 +547,7 @@ class CodexErrorInfoValue(Enum):
     server_overloaded = "serverOverloaded"
     cyber_policy = "cyberPolicy"
     misalignment_policy_violation = "misalignmentPolicyViolation"
+    too_many_denials = "tooManyDenials"
     internal_server_error = "internalServerError"
     unauthorized = "unauthorized"
     bad_request = "badRequest"
@@ -11473,7 +11474,7 @@ class Turn(BaseModel):
         ),
     ] = None
     error: Annotated[
-        TurnError | None, Field(description="Only populated when the Turn's status is failed.")
+        TurnError | None, Field(description="Error associated with a failed or interrupted turn.")
     ] = None
     id: Annotated[
         str, Field(description="Identifier for this turn. Codex-generated turn IDs are UUIDv7.")

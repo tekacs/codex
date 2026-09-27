@@ -1,3 +1,12 @@
+# Guardian circuit-breaker errors
+
+Set `auto_review.circuit_break_action = "strict"` to include `TooManyDenials` in
+`TurnAborted.error` when Guardian reaches its denial limit. App-server exposes it
+as `turn.error.codexErrorInfo = "tooManyDenials"` in notifications and history.
+
+The default, `"default"`, leaves this error unset. Both modes preserve the warning,
+denial limit, and interrupted status; neither emits a separate `Error` event.
+
 # Model catalog provider requirements
 
 `model/list` and periodic model catalog refreshes check the startup provider against

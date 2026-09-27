@@ -1599,6 +1599,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
             codex_protocol::protocol::TurnAbortedEvent {
                 turn_id: Some(format!("wake-{window_number}")),
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 started_at: None,
                 completed_at: None,
                 duration_ms: None,
@@ -2130,6 +2131,7 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             },
@@ -2268,6 +2270,7 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
                 turn_id: Some(unmatched_abort_turn_id),
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             },
