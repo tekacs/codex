@@ -26,7 +26,7 @@ working=true, response rows=1, 80x6
   ? for shortcuts
 
 working=false, response rows=1, 80x12
-Show a response.
+› Show a response.
 
 • Done.
   └ Tip: Try /help.
@@ -40,7 +40,7 @@ Show a response.
   ? for shortcuts
 
 working=false, response rows=30, 80x12
-Show a response.
+› Show a response.
 
 • Done.
   └ Tip: Try /help.
@@ -65,7 +65,7 @@ working=false, response rows=1, 80x9
   ? for shortcuts
 
 working=false, response rows=1, 80x10
-Show a response.
+› Show a response.
 • Done.
 
   [completion time]
@@ -77,7 +77,7 @@ Show a response.
   ? for shortcuts
 
 working=false, response rows=1, 80x11
-Show a response.
+› Show a response.
 • Done.
   └ Tip: Try /help.
 

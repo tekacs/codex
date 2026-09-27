@@ -8469,6 +8469,13 @@ class ListMcpServerStatusParams(BaseModel):
         int | None,
         Field(description="Optional page size; defaults to a server-defined value.", ge=0),
     ] = None
+    server_name: Annotated[
+        str | None,
+        Field(
+            alias="serverName",
+            description="Limit discovery to one server. With a thread ID, reuse that thread's MCP connection.",
+        ),
+    ] = None
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
 
 

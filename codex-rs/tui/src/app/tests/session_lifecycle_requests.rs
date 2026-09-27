@@ -1123,6 +1123,7 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         .request_typed(ClientRequest::McpServerStatusList {
             request_id: AppServerRequestId::String("tui-tool-inventory".to_string()),
             params: codex_app_server_protocol::ListMcpServerStatusParams {
+                server_name: None,
                 cursor: None,
                 limit: None,
                 detail: Some(codex_app_server_protocol::McpServerStatusDetail::ToolsAndAuthOnly),

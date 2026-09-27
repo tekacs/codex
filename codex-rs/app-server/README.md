@@ -313,6 +313,12 @@ This is the server's advertised MCP capabilities object, including its `extensio
 map. It is null when the connection has not initialized successfully; capabilities
 are never inferred from tools or copied from a shared catalog cache.
 
+Pass `serverName` to discover only that server. With `threadId`, the request
+reuses the thread's current MCP connection and tool catalog after any pending
+runtime refresh; discovery then waits only for that server. Without `threadId`,
+discovery creates a connection for the selected server. An unknown name returns an empty page.
+Omitting `serverName` preserves full-inventory discovery.
+
 # MCP OAuth login
 
 `mcpServer/oauth/login` only returns HTTP(S) authorization URLs. Authorization
