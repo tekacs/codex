@@ -125,6 +125,56 @@ fn raw_items(history: &ContextManager) -> Vec<ResponseItem> {
 }
 
 #[test]
+fn delivered_assistant_context_invalidates_reviews_without_changing_authorization() {
+    let revisions = |history: &ContextManager| {
+        let snapshot = history.conversation_history_snapshot();
+        (
+            snapshot.guardian_review_context_revision(),
+            snapshot.user_message_revision(),
+        )
+    };
+    let mut history = create_history_with_items(vec![user_msg("Yes.")]);
+    let before_delivery = history.conversation_history_snapshot();
+    let authorization = before_delivery.user_message_revision();
+    let event = RetainedContextEvent::DeliveredAssistantMessage {
+        message: codex_history::RetainedUserMessage {
+            origin: codex_history::UserInputOrigin::User,
+            turn_id: "turn".to_owned(),
+            message_id: Some("send".to_owned()),
+            text: "Deploy publicly?".to_owned(),
+            complete: true,
+            phase: None,
+        },
+        acceptance_order: history.reserve_input_order(),
+    };
+    assert!(history.record_retained_context(&event));
+    let delivered_revision = revisions(&history).0;
+    assert_ne!(
+        before_delivery.guardian_review_context_revision(),
+        delivered_revision
+    );
+    assert!(!history.record_retained_context(&event));
+    assert_eq!(revisions(&history), (delivered_revision, authorization));
+    let mut resumed = ContextManager::new();
+    resumed.restore_retained_context(Some(history.retained_context()));
+    assert_ne!(revisions(&resumed).0, delivered_revision);
+
+    let answer = RetainedContextEvent::VerifiedAnswer {
+        answer: codex_history::VerifiedAnswer {
+            turn_id: "turn".to_owned(),
+            call_id: "ask".to_owned(),
+            questions: vec![codex_history::VerifiedQuestionAnswer {
+                question: "Run tests?".to_owned(),
+                answer: "Yes.".to_owned(),
+            }],
+        },
+        acceptance_order: Some(history.reserve_input_order()),
+    };
+    assert!(history.record_retained_context(&answer));
+    assert_eq!(revisions(&history), (delivered_revision, authorization + 1));
+}
+
+#[test]
 fn conversation_history_snapshot_shares_response_items_until_history_changes() {
     let mut history = create_history_with_items(vec![assistant_msg("original")]);
     let snapshot = history.conversation_history_snapshot();

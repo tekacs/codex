@@ -15,6 +15,12 @@ pub trait ConversationHistorySnapshot: Send + Sync {
     /// history resets, but stays unchanged for compaction and internal context.
     fn user_message_revision(&self) -> u64;
 
+    /// Changes when host-confirmed assistant evidence can change how Guardian interprets input.
+    /// Hosts without out-of-band assistant evidence may retain the default.
+    fn guardian_review_context_revision(&self) -> u64 {
+        0
+    }
+
     /// Returns the snapshot's response items in conversation order.
     fn items(&self) -> Box<dyn Iterator<Item = &ResponseItem> + Send + '_>;
 

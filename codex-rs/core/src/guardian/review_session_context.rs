@@ -30,10 +30,10 @@ impl ReviewContextPolicy {
         }
     }
 
-    pub(super) async fn root_authorization_version(
+    pub(super) async fn root_review_version(
         self,
         session: &Session,
-    ) -> Option<GuardianAuthorizationVersion> {
+    ) -> Option<(GuardianAuthorizationVersion, u64)> {
         if self != Self::ThreadOwned {
             return None;
         }
@@ -42,7 +42,12 @@ impl ReviewContextPolicy {
             .agent_control
             .get_guardian_package(session.thread_id)
             .await
-            .map(|snapshot| snapshot.authorization_version)
+            .map(|snapshot| {
+                (
+                    snapshot.authorization_version,
+                    snapshot.review_context_revision,
+                )
+            })
     }
 
     pub(super) fn parent_compaction(

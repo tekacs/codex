@@ -73,11 +73,19 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use crate::context::GuardianContextMode;
 
+static GUARDIAN_REVIEW_CONTEXT_REVISION: AtomicU64 = AtomicU64::new(/*v*/ 1);
+
+fn next_guardian_review_context_revision() -> u64 {
+    GUARDIAN_REVIEW_CONTEXT_REVISION.fetch_add(/*val*/ 1, Ordering::Relaxed)
+}
+
 /// Transcript of thread history
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContextManager {
     /// The oldest items are at the beginning of the vector. Snapshots share the vector until a
     /// caller needs to mutate it, avoiding deep copies for read-only history consumers.
@@ -95,6 +103,8 @@ pub(crate) struct ContextManager {
     pub(crate) reset_version: u64,
     /// Monotonic user-input/reset revision, independent of compaction's history generation.
     user_message_revision: u64,
+    /// Process-unique so resumed roots cannot match a worker's cached assistant evidence.
+    guardian_review_context_revision: u64,
     token_info: Option<TokenUsageInfo>,
     /// Reference context snapshot used for diffing and producing model-visible
     /// settings update items.
@@ -119,6 +129,7 @@ struct SharedConversationHistory {
     guardian_review_mode: GuardianContextMode,
     history_version: u64,
     user_message_revision: u64,
+    guardian_review_context_revision: u64,
 }
 
 pub(crate) enum HistoryReplacement {
@@ -177,6 +188,10 @@ impl ConversationHistorySnapshot for SharedConversationHistory {
         self.user_message_revision
     }
 
+    fn guardian_review_context_revision(&self) -> u64 {
+        self.guardian_review_context_revision
+    }
+
     fn items(&self) -> Box<dyn Iterator<Item = &ResponseItem> + Send + '_> {
         Box::new(self.items_with_sources().map(|(item, _)| item))
     }
@@ -202,6 +217,12 @@ impl SharedConversationHistory {
     }
 }
 
+impl Default for ContextManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContextManager {
     pub(crate) fn new() -> Self {
         Self {
@@ -213,6 +234,7 @@ impl ContextManager {
             history_version: 0,
             reset_version: 0,
             user_message_revision: 0,
+            guardian_review_context_revision: next_guardian_review_context_revision(),
             token_info: TokenUsageInfo::new_or_append(
                 &None, &None, /*model_context_window*/ None,
             ),
@@ -229,6 +251,7 @@ impl ContextManager {
             guardian_review_mode: self.guardian_review_mode,
             history_version: self.history_version,
             user_message_revision: self.user_message_revision,
+            guardian_review_context_revision: self.guardian_review_context_revision,
         })
     }
 
@@ -251,7 +274,15 @@ impl ContextManager {
         if !Arc::make_mut(&mut self.retained_context).record(event) {
             return false;
         }
-        self.user_message_revision = self.user_message_revision.saturating_add(1);
+        match event {
+            RetainedContextEvent::VerifiedAnswer { .. } => {
+                self.user_message_revision =
+                    self.user_message_revision.saturating_add(/*rhs*/ 1);
+            }
+            RetainedContextEvent::DeliveredAssistantMessage { .. } => {
+                self.guardian_review_context_revision = next_guardian_review_context_revision();
+            }
+        }
         true
     }
 

@@ -135,6 +135,7 @@ pub(crate) async fn handle_mcp_tool_call(
     prepared_call: Option<PreparedMcpCall>,
     hook_tool_name: HookToolName,
     invocation_tool_name: ToolName,
+    source: &crate::tools::context::ToolCallSource,
     arguments: String,
 ) -> HandledMcpToolCall {
     let turn_context = &step_context.turn;
@@ -306,6 +307,7 @@ pub(crate) async fn handle_mcp_tool_call(
                     prepared_call,
                     metadata,
                     item_metadata,
+                    source,
                     McpToolApprovalApplication::Apply {
                         decision,
                         policy: approval_policy,
@@ -383,6 +385,7 @@ pub(crate) async fn handle_mcp_tool_call(
         prepared_call,
         metadata,
         item_metadata,
+        source,
         McpToolApprovalApplication::NotRequired,
     )
     .await
@@ -445,6 +448,7 @@ async fn handle_approved_mcp_tool_call(
     prepared_call: PreparedMcpCall,
     metadata: McpToolApprovalMetadata,
     item_metadata: McpToolCallItemMetadata,
+    source: &crate::tools::context::ToolCallSource,
     approval_application: McpToolApprovalApplication,
 ) -> HandledMcpToolCall {
     let turn_context = step_context.turn.as_ref();
@@ -542,6 +546,15 @@ async fn handle_approved_mcp_tool_call(
                 })
                 .await
                 .map_err(|error| format!("tool call error: {error:?}"))?;
+            crate::tools::record_confirmed_code_mode_send(
+                sess,
+                &turn_context.sub_id,
+                call_id,
+                source,
+                &prepared_call,
+                &tool_input,
+                &result,
+            );
             // Capture trusted server metadata before result callbacks or model-facing rewrites.
             elicitation_type = mcp_tool_call_auth_elicitation_type(&server, connector_id, &result);
             let mcp_tool = McpToolContext::from_prepared_call(

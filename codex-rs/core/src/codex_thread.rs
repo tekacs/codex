@@ -179,6 +179,8 @@ pub struct GuardianRootSnapshot {
     /// Distinguishes a history reset from additional authorization in the same history.
     pub(crate) history_reset_version: u64,
     pub authorization_version: GuardianAuthorizationVersion,
+    /// Confirmed assistant context is relevant to review but cannot authorize an action.
+    pub review_context_revision: u64,
     pub messages: Vec<GuardianRootMessage>,
     pub trusted_skill_paths: Vec<String>,
 }
