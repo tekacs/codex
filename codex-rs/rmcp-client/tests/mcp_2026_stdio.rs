@@ -53,29 +53,9 @@ async fn exercise_stdio_server(
     let (server, cwd) = if use_executor {
         (server, cwd)
     } else {
-        use std::os::unix::fs::PermissionsExt;
         let wrapper = root.path().join("server");
         let script = "#!/bin/sh\nprintf '%s' \"$0\" > argv0\nexec \"$MCP_SERVER\" \"$@\"\n";
-        #[cfg(target_os = "linux")]
-        {
-            // Keep the writable descriptor out of this process so concurrent test
-            // spawns cannot inherit it and cause ETXTBSY when launching the wrapper.
-            let output = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg("printf '%s' \"$1\" > \"$2\"")
-                .arg("write-mcp-fixture")
-                .arg(script)
-                .arg(&wrapper)
-                .output()?;
-            anyhow::ensure!(
-                output.status.success(),
-                "failed to write MCP wrapper: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        #[cfg(not(target_os = "linux"))]
-        std::fs::write(&wrapper, script)?;
-        std::fs::set_permissions(wrapper, std::fs::Permissions::from_mode(0o755))?;
+        codex_utils_cargo_bin::write_executable(&wrapper, script)?;
         env.insert(OsString::from("MCP_SERVER"), server.into_os_string());
         (
             std::path::PathBuf::from("./server"),
