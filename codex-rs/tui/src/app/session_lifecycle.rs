@@ -929,7 +929,7 @@ impl App {
         Ok(())
     }
 
-    pub(super) async fn start_fresh_session_with_summary_hint(
+    pub(super) async fn start_fresh_session(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
@@ -963,12 +963,6 @@ impl App {
             app_server.managed_new_thread_defaults(),
             &self.cli_kv_overrides,
             &self.harness_overrides,
-        );
-        let summary = session_summary(
-            self.chat_widget.token_usage(),
-            self.chat_widget.thread_id(),
-            self.chat_widget.thread_name(),
-            self.chat_widget.rollout_path().as_deref(),
         );
         match app_server
             .start_thread_with_session_start_source(
@@ -1016,25 +1010,8 @@ impl App {
                     self.chat_widget.add_error_message(format!(
                         "Failed to attach to fresh app-server thread: {err}"
                     ));
-                } else {
-                    if let Some(err) = name_error {
-                        self.chat_widget.add_error_message(err);
-                    }
-                    if let Some(summary) = summary {
-                        let mut lines: Vec<Line<'static>> = Vec::new();
-                        if let Some(usage_line) = summary.usage_line {
-                            lines.push(usage_line.into());
-                        }
-                        if let Some(command) = summary.resume_hint {
-                            let spans =
-                                vec!["To continue this session, run ".into(), command.cyan()];
-                            lines.push(spans.into());
-                        }
-                        self.chat_widget
-                            .add_to_history(history_cell::SessionNoticeCell(
-                                history_cell::PlainHistoryCell::new(lines),
-                            ));
-                    }
+                } else if let Some(err) = name_error {
+                    self.chat_widget.add_error_message(err);
                 }
             }
             Err(err) => {
@@ -1287,12 +1264,6 @@ impl App {
         let baseline_permissions = RuntimePermissionProfileOverride::from_config(&resume_config);
         self.apply_runtime_policy_overrides(&mut resume_config, RuntimePolicyOverrideScope::All);
 
-        let summary = session_summary(
-            self.chat_widget.token_usage(),
-            self.chat_widget.thread_id(),
-            self.chat_widget.thread_name(),
-            self.chat_widget.rollout_path().as_deref(),
-        );
         if let Some(history_mode) = target_session.history_mode {
             app_server.remember_thread_history_mode(target_session.thread_id, history_mode);
         }
@@ -1386,17 +1357,6 @@ impl App {
                 if !read_only {
                     self.replay_agents_overview_requests(app_server, resumed_thread_id)
                         .await;
-                }
-                if let Some(summary) = summary {
-                    let mut lines: Vec<Line<'static>> = Vec::new();
-                    if let Some(usage_line) = summary.usage_line {
-                        lines.push(usage_line.into());
-                    }
-                    if let Some(command) = summary.resume_hint {
-                        let spans = vec!["To continue this session, run ".into(), command.cyan()];
-                        lines.push(spans.into());
-                    }
-                    self.chat_widget.add_plain_history_lines(lines);
                 }
                 if !read_only {
                     self.maybe_prompt_resume_paused_goal_after_resume(
