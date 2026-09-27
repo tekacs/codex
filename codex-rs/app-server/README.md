@@ -10,8 +10,9 @@ and caching behavior remain in effect while the provider satisfies current requi
 # MCP App UI
 
 `mcpToolCall.mcpAppUi` records the invoked descriptor's `resourceUri`
-and `preferredModelDisplayMode` (`inline` or `fullscreen`). Descriptors with a widget
-URI default to `inline` when the preference is missing or unsupported. The
+and explicit `preferredModelDisplayMode` (`inline` or `fullscreen`). Missing or
+unsupported preferences leave `mcpAppUi` unset; `mcpAppResourceUri` retains the URI
+so clients can apply resource display defaults. The
 UI information is preserved in tool-call events and saved history so clients can
 render without waiting for the full MCP catalog.
 
