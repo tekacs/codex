@@ -218,7 +218,7 @@ impl GuardianReviewSessionReuseKey {
                 context_mode,
                 &spawn_config.features,
             ) {
-                ReviewContextPolicy::Legacy => 0,
+                ReviewContextPolicy::Legacy | ReviewContextPolicy::Independent => 0,
                 ReviewContextPolicy::LegacyWithCheckpointReuse
                 | ReviewContextPolicy::ThreadOwned => parent_history_version,
             },
@@ -491,7 +491,7 @@ async fn run_review_on_session(
 
             let parent_history = params.parent_history.conversation_history_snapshot();
             let history = if GuardianContextMode::from_history(parent_history.as_ref())
-                == GuardianContextMode::ThreadOwned
+                != GuardianContextMode::Legacy
             {
                 parent_history
             } else {

@@ -328,6 +328,7 @@ pub enum Feature {
     /// Removed compatibility flag for always-on thread-owned Guardian context.
     GuardianThreadContext,
     /// Reuse encrypted parent compaction when restarting Guardian review sessions.
+    /// When disabled, retain an independent review transcript across parent compaction.
     GuardianReuseParentCompaction,
     /// Include completed node_repl or cua_repl Code Mode responses in Guardian reviews.
     GuardianEnhancedNodeReplTranscripts,

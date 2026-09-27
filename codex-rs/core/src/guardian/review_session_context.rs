@@ -1,5 +1,5 @@
-//! Owns sync reviewer checkpoint and invalidation policy for both context modes.
-//! Legacy may keep its existing transcript; thread-owned mode requires current parent context.
+//! Owns sync reviewer checkpoint and invalidation policy for each context mode.
+//! Independent review preserves thread-owned authorization without inheriting parent checkpoints.
 
 use codex_features::Feature;
 use codex_protocol::models::ResponseItem;
@@ -15,12 +15,14 @@ pub(super) enum ReviewContextPolicy {
     Legacy,
     LegacyWithCheckpointReuse,
     ThreadOwned,
+    Independent,
 }
 
 impl ReviewContextPolicy {
     pub(super) fn for_context(mode: GuardianContextMode, features: &ManagedFeatures) -> Self {
         match mode {
             GuardianContextMode::ThreadOwned => Self::ThreadOwned,
+            GuardianContextMode::Independent => Self::Independent,
             GuardianContextMode::Legacy
                 if features.enabled(Feature::GuardianReuseParentCompaction) =>
             {
@@ -34,7 +36,7 @@ impl ReviewContextPolicy {
         self,
         session: &Session,
     ) -> Option<(GuardianAuthorizationVersion, u64)> {
-        if self != Self::ThreadOwned {
+        if matches!(self, Self::Legacy | Self::LegacyWithCheckpointReuse) {
             return None;
         }
         session
@@ -54,7 +56,7 @@ impl ReviewContextPolicy {
         self,
         history: &ContextManager,
     ) -> anyhow::Result<Option<ResponseItem>> {
-        if self == Self::Legacy {
+        if matches!(self, Self::Legacy | Self::Independent) {
             return Ok(None);
         }
         let Some(checkpoint) =

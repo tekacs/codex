@@ -112,6 +112,13 @@ fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
     }
 }
 
+fn root_history() -> ContextManager {
+    ContextManager::for_session(
+        &SessionSource::Cli,
+        &ManagedFeatures::from(codex_features::Features::with_defaults()),
+    )
+}
+
 fn create_history_with_items(items: Vec<ResponseItem>) -> ContextManager {
     let mut h = ContextManager::new();
     // Use a generous but fixed token budget; tests only rely on truncation
@@ -220,7 +227,7 @@ fn conversation_history_snapshot_binds_review_mode_and_hash_to_the_latest_item(
             ..Default::default()
         }),
     };
-    let mut history = ContextManager::for_session(&codex_protocol::protocol::SessionSource::Cli);
+    let mut history = root_history();
     history.replace_annotated(vec![checkpoint.clone()]);
     history.restore_review_context(
         /*retained_context*/ None,
@@ -304,7 +311,7 @@ fn conversation_history_snapshot_binds_review_mode_and_hash_to_the_latest_item(
     }]
 }); "retained assistant context")]
 fn checkpoint_retained_evidence_survives_legacy_review(saved_context: serde_json::Value) {
-    let mut history = ContextManager::for_session(&codex_protocol::protocol::SessionSource::Cli);
+    let mut history = root_history();
     history.replace_annotated(vec![ResponseItemEnvelope::new(
         serde_json::from_value(serde_json::json!({
             "type": "compaction", "id": "unknown", "encrypted_content": "opaque checkpoint"
@@ -316,9 +323,9 @@ fn checkpoint_retained_evidence_survives_legacy_review(saved_context: serde_json
     for (checkpoint, expected_mode) in [
         (None, GuardianContextMode::ThreadOwned),
         (
-            Some(GuardianHistoryCheckpoint(vec![assistant_msg(
-                "Original transcript",
-            )])),
+            Some(GuardianHistoryCheckpoint(vec![
+                assistant_msg("Original transcript").into(),
+            ])),
             GuardianContextMode::Legacy,
         ),
     ] {
@@ -340,7 +347,7 @@ fn checkpoint_retained_evidence_survives_legacy_review(saved_context: serde_json
 
 #[test]
 fn checkpoint_replayed_messages_keep_legacy_review_when_the_source_survives() {
-    let mut history = ContextManager::for_session(&codex_protocol::protocol::SessionSource::Cli);
+    let mut history = root_history();
     history.replace_annotated(vec![ResponseItemEnvelope::new(
         serde_json::from_value(serde_json::json!({
             "type": "compaction", "id": "unknown", "encrypted_content": "opaque checkpoint"
@@ -386,7 +393,7 @@ fn plaintext_checkpoint_without_backup_preserves_root_instructions(
     .expect("old instruction without ordering metadata");
     let saved_context: Option<RetainedContext> =
         saved_context.map(|value| serde_json::from_value(value).expect("legacy retained context"));
-    let mut history = ContextManager::for_session(&SessionSource::Cli);
+    let mut history = root_history();
     history.replace(vec![instruction]);
     history.restore_review_context(
         saved_context.as_ref(),
@@ -407,7 +414,7 @@ fn plaintext_checkpoint_without_backup_preserves_root_instructions(
         }),
     }];
     history.replace_compacted(compacted.clone(), Some("reviewer"));
-    let mut resumed = ContextManager::for_session(&SessionSource::Cli);
+    let mut resumed = root_history();
     resumed.replace_annotated(compacted.clone());
     resumed.restore_review_context(
         Some(history.retained_context()),
@@ -464,7 +471,7 @@ fn legacy_checkpoint_rollback_keeps_answers_before_a_same_turn_steer() {
         .verified_answers()
         .cloned()
         .collect::<Vec<_>>();
-    let mut history = ContextManager::for_session(&SessionSource::Cli);
+    let mut history = root_history();
     history.replace_annotated(checkpoint.replacement_history.take().unwrap());
     history.restore_review_context(
         checkpoint.retained_context.as_ref(),
@@ -1576,7 +1583,7 @@ fn drop_last_n_user_turns_preserves_prefix() {
 
     // A steered message shares its source turn, but rollback must keep the earlier
     // instruction and answer as complete evidence, including after the next compaction.
-    let mut history = ContextManager::for_session(&codex_protocol::protocol::SessionSource::Exec);
+    let mut history = root_history();
     let mut expected = None;
     for (id, text) in [
         ("restriction", "Never publish publicly."),
@@ -1626,7 +1633,7 @@ fn drop_last_n_user_turns_preserves_prefix() {
 
 #[test]
 fn rollback_removes_assistant_sources_recorded_ahead_of_queued_input() {
-    let mut history = ContextManager::for_session(&codex_protocol::protocol::SessionSource::Exec);
+    let mut history = root_history();
     let original = user_msg("Staging only.");
     let mut items = [
         (original.clone(), 0),

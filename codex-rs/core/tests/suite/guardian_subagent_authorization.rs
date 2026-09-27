@@ -1663,10 +1663,7 @@ async fn run_guardian_subagent_review(
             if matches!(missing_source, MissingCheckpointSource::VerifiedAnswer) {
                 // The phase-bearing commentary original survives only in the backup.
                 checkpoint.guardian_history = Some(codex_history::GuardianHistoryCheckpoint(
-                    original_history
-                        .iter()
-                        .map(|envelope| envelope.item.clone())
-                        .collect(),
+                    original_history.clone(),
                 ));
             }
             checkpoint.replacement_history = Some(replacement_history);

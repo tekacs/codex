@@ -134,7 +134,7 @@ impl Classification {
             }
             None => None,
         };
-        let root_snapshot = if context_mode == GuardianContextMode::ThreadOwned {
+        let root_snapshot = if context_mode != GuardianContextMode::Legacy {
             root_snapshot
         } else {
             thread.guardian_root_snapshot().await

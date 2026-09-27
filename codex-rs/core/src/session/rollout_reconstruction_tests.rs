@@ -124,7 +124,10 @@ async fn recorded_questions_share_queued_input_order_across_resume() {
 async fn sender_context_follows_its_delivery_through_checkpoint_and_rollback() {
     let (session, turn_context) = make_session_and_context().await;
 
-    let mut live = ContextManager::for_session(&SessionSource::default());
+    let mut live = ContextManager::for_session(
+        &SessionSource::default(),
+        &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+    );
     let mut items = Vec::new();
     let mut snapshots = Vec::new();
     for index in 0..2 {
@@ -1555,7 +1558,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
                     })])),
                     retained_context: None,
                     guardian_history: Some(codex_history::GuardianHistoryCheckpoint(vec![
-                        user_message("original task"),
+                        user_message("original task").into(),
                     ])),
                     mcp_resource_origins: None,
                     window_number: Some(window_number as u64),
@@ -1629,8 +1632,8 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
     assert_eq!(
         bounded.guardian_history.as_ref(),
         Some(&codex_history::GuardianHistoryCheckpoint(vec![
-            user_message("original task"),
-            assistant_message("continued working"),
+            user_message("original task").into(),
+            assistant_message("continued working").into()
         ])),
     );
     if current {

@@ -6568,7 +6568,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history = ContextManager::for_session(&session_configuration.session_source);
+    state.history =
+        ContextManager::for_session(&session_configuration.session_source, &config.features);
     let (environment_manager, resolved_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;
@@ -8842,7 +8843,8 @@ where
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history = ContextManager::for_session(&session_configuration.session_source);
+    state.history =
+        ContextManager::for_session(&session_configuration.session_source, &config.features);
     let (environment_manager, resolved_turn_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;

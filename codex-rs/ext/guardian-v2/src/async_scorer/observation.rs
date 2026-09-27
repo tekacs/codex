@@ -304,7 +304,7 @@ impl GuardianV2Extension {
         };
         // Capture root evidence before background metadata resolution or model I/O.
         // Later root authorization or review-context changes invalidate this sample.
-        let root_snapshot = if context_mode == GuardianContextMode::ThreadOwned {
+        let root_snapshot = if context_mode != GuardianContextMode::Legacy {
             thread.guardian_root_snapshot().await
         } else {
             None

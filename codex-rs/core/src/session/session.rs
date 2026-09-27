@@ -1492,6 +1492,7 @@ impl Session {
                 initial_auto_compact_window_ids,
                 ContextManager::for_session(
                     &session_configuration.session_source,
+                    &config.features,
                 ),
             );
             state.base_instructions_provenance = base_instructions_provenance.clone();

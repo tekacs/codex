@@ -36,6 +36,12 @@ pub trait ConversationHistorySnapshot: Send + Sync {
         self.retained_context().is_some()
     }
 
+    /// Whether the host retains a bounded review transcript independently of parent compaction.
+    /// Such snapshots must never seed reviewers with the parent's opaque checkpoint.
+    fn uses_independent_review_history(&self) -> bool {
+        false
+    }
+
     /// Latest opaque checkpoint, including unusable items, with its recorded producer.
     /// Hosts without provenance leave the producer unknown rather than using the live model.
     fn latest_compaction(&self) -> Option<CompactionCheckpoint<'_>> {

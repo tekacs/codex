@@ -664,7 +664,17 @@ fn compacted_metadata_remains_compatible_with_legacy_response_item_readers() -> 
     };
     assert_eq!(*legacy_response, response_item);
 
-    let checkpoint = crate::GuardianHistoryCheckpoint(vec![response_item.clone()]);
+    let checkpoint = crate::GuardianHistoryCheckpoint(vec![envelope.clone()]);
+    assert_eq!(
+        serde_json::from_value::<Vec<ResponseItem>>(serde_json::to_value(&checkpoint)?)?,
+        vec![response_item.clone()],
+    );
+    assert_eq!(
+        serde_json::from_value::<crate::GuardianHistoryCheckpoint>(serde_json::to_value(vec![
+            response_item.clone()
+        ])?)?,
+        crate::GuardianHistoryCheckpoint(vec![response_item.clone().into()]),
+    );
     let compacted_line = serde_json::to_value(RolloutItem::Compacted(CompactedItem {
         message: "summary".to_string(),
         replacement_history: Some(vec![envelope]),
