@@ -591,6 +591,13 @@ fn list_ordered() {
 }
 
 #[test]
+fn empty_list_items_keep_their_markers() {
+    let rendered =
+        ["8.", "-\n  -", "> -\n>   -"].map(|source| plain_lines(&render_markdown_text(source)));
+    assert_debug_snapshot!("empty_list_items", rendered);
+}
+
+#[test]
 fn list_nested() {
     let text = render_markdown_text("- List item 1\n  - Nested list item 1\n");
     let expected = Text::from_iter([
