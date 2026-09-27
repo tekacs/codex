@@ -150,7 +150,7 @@ impl MarkdownStyles {
             emphasis: Style::new().italic(),
             strong: Style::new().bold(),
             strikethrough: Style::new().crossed_out(),
-            ordered_list_marker: Style::new().fg(accent_color()),
+            ordered_list_marker: Style::new().light_blue(),
             unordered_list_marker: Style::new(),
             link: Style::new().fg(accent_color()).underlined(),
             blockquote: Style::new().green(),
