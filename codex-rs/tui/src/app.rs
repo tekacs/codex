@@ -225,6 +225,7 @@ mod file_change_approvals;
 mod history_pagination;
 mod history_ui;
 mod input;
+mod link_hover;
 mod loaded_threads;
 mod managed_worktree_creation;
 mod misalignment_policy;
@@ -834,6 +835,8 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
+        tui.link_hover.observe(&event);
+        self.refresh_link_hover(tui)?;
         self.invalidate_right_click_paste(&event);
         self.finish_clipboard(tui);
         let event = self.finish_right_click_paste(tui, event);

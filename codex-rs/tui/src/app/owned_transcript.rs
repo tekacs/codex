@@ -280,6 +280,7 @@ impl App {
             tui.frame_requester()
                 .schedule_frame_in(Duration::from_millis(/*millis*/ 50));
         }
+        self.refresh_link_hover(tui)?;
         Ok(bottom_area)
     }
 
