@@ -323,9 +323,17 @@ impl ChatWidget {
                     /*hint*/ None,
                 ));
             } else {
-                self.add_to_history(history_cell::new_error_event(
-                    self.interrupted_turn_message(reason),
-                ));
+                self.add_to_history(match reason {
+                    TurnAbortReason::BudgetLimited => history_cell::new_error_event(
+                        "Goal budget reached - the turn was stopped.".to_string(),
+                    ),
+                    TurnAbortReason::Interrupted => PlainHistoryCell::new(vec![
+                        Line::from(
+                            "■ Conversation interrupted - use /feedback if something went wrong",
+                        )
+                        .style(crate::style::secondary_text_style()),
+                    ]),
+                });
             }
         }
 

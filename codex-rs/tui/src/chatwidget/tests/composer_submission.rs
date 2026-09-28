@@ -1670,7 +1670,7 @@ fn interrupted_history(
     }
     let history = history.join("\n");
     assert!(
-        history.contains("Conversation interrupted - tell the model what to do differently."),
+        history.contains("Conversation interrupted"),
         "expected normal interruption notice, got {history:?}"
     );
     (saw_prompt, history)
